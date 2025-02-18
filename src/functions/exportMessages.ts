@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { ExportMessagesOptions, InpulseUser, SavedMessage, SavedMessageWithFile } from "../types";
 import instances from "../instances";
 import { FieldPacket, RowDataPacket } from "mysql2";
@@ -28,11 +29,15 @@ async function exportMessages({
     const users: Map<number, InpulseUser> = await fetchUsers(pool);
     const chats: Map<number, ChatToExport> = mapChats(messages, users);
 
-    if (format === "pdf" && messages.length > 5000) {
+    const maxConcurrencyPdf = Number(process.env.EXPORT_MESSAGES_CONCURRENCY_PDF || 2);
+    const maxConcurrencyTxt = Number(process.env.EXPORT_MESSAGES_CONCURRENCY || 100);
+    const maxMessagesPdf = Number(process.env.EXPORT_MESSAGES_MAX_COUNT_PDF || 500);
+
+    if (format === "pdf" && messages.length > maxMessagesPdf) {
         throw new Error("Muitas mensagens para processar. \nPor favor, selecione outro formato de exportação ou um intervalo de datas menor.");
     }
 
-    const taskQueue = createTaskQueue(format === "pdf" ? 2 : 100);
+    const taskQueue = createTaskQueue(format === "pdf" ? maxConcurrencyPdf : maxConcurrencyTxt);
 
     switch (format) {
         case "txt":
@@ -146,8 +151,6 @@ function mapChats(messages: SavedMessage[], users: Map<number, InpulseUser>) {
 export function toDownloadLink(message: SavedMessageWithFile, clientName: string): string {
     const baseUrl = (process.env.REQUEST_URL || "http://localhost:8000/api/:clientName").replace(":clientName", clientName);
 
-
-    console.log(baseUrl)
     return `${baseUrl}/custom-routes/file/${message.ARQUIVO_NOME}`;
 }
 
