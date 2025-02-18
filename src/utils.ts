@@ -8,12 +8,14 @@ import { Router } from "express";
 import { config } from "dotenv";
 import { extension } from "mime-types";
 import { ParsedMessage } from "./types";
+import archiver from "archiver";
+import { createWriteStream } from "node:fs";
 
 config();
 
-const filesPath = process.env.FILES_DIRECTORY!;
+export const filesPath = process.env.FILES_DIRECTORY!;
 
-function isMessageFromNow(message: WAWebJS.Message) {
+export function isMessageFromNow(message: WAWebJS.Message) {
 	const messageDate = new Date(Number(`${message.timestamp}000`));
 	const currentDate = new Date();
 	const TWO_MINUTES = 1000 * 60 * 2;
@@ -22,7 +24,7 @@ function isMessageFromNow(message: WAWebJS.Message) {
 	return timeDifference <= TWO_MINUTES;
 }
 
-async function parseMessage(message: WAWebJS.Message) {
+export async function parseMessage(message: WAWebJS.Message) {
 	try {
 		if (process.env.USE_LOCAL_DATE) {
 			message.timestamp = Date.now();
@@ -98,7 +100,7 @@ async function parseMessage(message: WAWebJS.Message) {
 	}
 }
 
-function encodeParsedMessage(message: ParsedMessage): ParsedMessage {
+export function encodeParsedMessage(message: ParsedMessage): ParsedMessage {
 	return {
 		...message,
 		MENSAGEM: encodeURI(message.MENSAGEM),
@@ -112,7 +114,7 @@ function encodeParsedMessage(message: ParsedMessage): ParsedMessage {
 	};
 }
 
-function decodeParsedMessage(message: ParsedMessage): ParsedMessage {
+export function decodeParsedMessage(message: ParsedMessage): ParsedMessage {
 	return {
 		...message,
 		MENSAGEM: decodeURI(message.MENSAGEM),
@@ -126,7 +128,7 @@ function decodeParsedMessage(message: ParsedMessage): ParsedMessage {
 	};
 }
 
-function mapToParsedMessage(dbRow: any): ParsedMessage {
+export function mapToParsedMessage(dbRow: any): ParsedMessage {
 	return {
 		ID: dbRow.ID,
 		MENSAGEM: dbRow.MENSAGEM || "",
@@ -147,7 +149,7 @@ function mapToParsedMessage(dbRow: any): ParsedMessage {
 	};
 }
 
-async function logWithDate(str: string, error?: any) {
+export function logWithDate(str: string, error?: any) {
 	const dateSring = new Date().toLocaleString();
 
 	if (error) {
@@ -157,7 +159,7 @@ async function logWithDate(str: string, error?: any) {
 	}
 }
 
-function getAllEndpoints(router: Router, path: string) {
+export function getAllEndpoints(router: Router, path: string) {
 	const endpoints: Array<string> = [];
 
 	if (router && router.stack) {
@@ -180,7 +182,7 @@ function getAllEndpoints(router: Router, path: string) {
 	return endpoints;
 }
 
-async function formatToOpusAudio(file: Buffer): Promise<Buffer> {
+export async function formatToOpusAudio(file: Buffer): Promise<Buffer> {
 	try {
 		const tempPath = join(filesPath, "temp");
 
@@ -231,7 +233,7 @@ async function formatToOpusAudio(file: Buffer): Promise<Buffer> {
 	}
 }
 
-function decodeSafeURI(uri: string) {
+export function decodeSafeURI(uri: string) {
 	try {
 		return decodeURI(uri);
 	} catch {
@@ -239,30 +241,114 @@ function decodeSafeURI(uri: string) {
 	}
 }
 
-function isUUID(str: string) {
+export function isUUID(str: string) {
 	const uuidRegex =
 		/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 	return uuidRegex.test(str);
 }
 
-function validatePhoneStr(str: string) {
+export function validatePhoneStr(str: string) {
 	const hasInvalidDigits = /\D/.test(str);
 	const hasInvalidLength = str.length < 10;
 
 	return !hasInvalidDigits && !hasInvalidLength;
 }
 
-export {
-	mapToParsedMessage,
-	isMessageFromNow,
-	parseMessage,
-	formatToOpusAudio,
-	logWithDate,
-	getAllEndpoints,
-	isUUID,
-	decodeSafeURI,
-	filesPath,
-	encodeParsedMessage,
-	decodeParsedMessage,
-	validatePhoneStr
+/**
+ * Compacta uma pasta em um arquivo ZIP.
+ * @param sourceFolder Caminho da pasta a ser compactada.
+ * @param outputZipPath Caminho do arquivo ZIP de saída.
+ * @returns Promise que resolve com o caminho do ZIP criado.
+ */
+export async function zipFolder(sourceFolder: string, outputZipPath: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const output = createWriteStream(outputZipPath);
+		const archive = archiver('zip', { zlib: { level: 9 } });
+
+		output.on('close', () => {
+			resolve(outputZipPath);
+		});
+
+		output.on('error', (err) => reject(err));
+		archive.on('error', (err) => reject(err));
+
+		archive.pipe(output);
+		archive.directory(sourceFolder, false);
+		archive.finalize();
+	});
+}
+
+export function formatPhone(n: string) {
+	let formatedNumber: string = "";
+
+	if (!n) return "";
+
+	if (n.length === 13) {
+		formatedNumber = `+${n.slice(0, 2)} (${n.slice(2, 4)}) ${n.slice(4, 5)} ${n.slice(5, 9)}-${n.slice(9, 13)}`;
+	} else if (n.length === 12) {
+		formatedNumber = `+${n.slice(0, 2)} (${n.slice(2, 4)}) ${n.slice(4, 8)}-${n.slice(8, 12)}`;
+	} else if (n.length === 11) {
+		formatedNumber = `(${n.slice(0, 2)}) ${n.slice(2, 5)}-${n.slice(5, 8)}-${n.slice(8, 11)}`;
+	} else if (n.length === 10) {
+		formatedNumber = `(${n.slice(0, 2)}) ${n.slice(2, 6)}-${n.slice(6, 10)}`;
+	} else {
+		formatedNumber = n;
+	};
+
+	return formatedNumber;
 };
+
+/**
+ * Creates a task queue with a specified concurrency limit.
+ * 
+ * @param concurrencyLimit - The maximum number of tasks to run concurrently.
+ * @returns An object with methods to add tasks to the queue and wait for all tasks to complete.
+ * 
+ * @function
+ * @name createTaskQueue
+ * 
+ * @example
+ * const queue = createTaskQueue(2);
+ * 
+ * queue.addTask(async () => {
+ *   // Task 1
+ * });
+ * 
+ * queue.addTask(async () => {
+ *   // Task 2
+ * });
+ * 
+ * queue.addTask(async () => {
+ *   // Task 3
+ * });
+ * 
+ * await queue.waitForCompletion();
+ * 
+ * @typedef {Object} TaskQueue
+ * @property {function(() => Promise<any>): void} addTask - Adds a task to the queue.
+ * @property {function(): Promise<void>} waitForCompletion - Waits for all tasks in the queue to complete.
+ */
+export function createTaskQueue(concurrencyLimit: number) {
+	const taskQueue = [];
+	const promises = [];
+
+	const runTask = async (task: () => Promise<any>) => {
+		await task();
+		if (taskQueue.length > 0) {
+			const nextTask = taskQueue.shift();
+			await runTask(nextTask);
+		}
+	};
+
+	const addTask = (task: () => Promise<any>) => {
+		if (promises.length < concurrencyLimit) {
+			promises.push(runTask(task));
+		} else {
+			taskQueue.push(task);
+		}
+	};
+
+	const waitForCompletion = () => Promise.all(promises);
+
+	return { addTask, waitForCompletion };
+}

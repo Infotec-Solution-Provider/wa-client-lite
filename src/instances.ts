@@ -46,6 +46,16 @@ class WhatsappInstances {
     public find(number: string) {
         return this.instances.find((i) => i.whatsappNumber == number);
     }
+
+    public getPool(clientName: string) {
+        const instance = this.instances.find((i) => i.clientName == clientName);
+
+        if (!instance) {
+            throw new Error(`Instance ${clientName} not found`);
+        }
+
+        return instance.pool;
+    }
 }
 
 const instances = new WhatsappInstances();

@@ -11,6 +11,7 @@ import { config } from "dotenv";
 import { loadContacts } from "./functions/loadContacts";
 import archiver from "archiver";
 import * as fs from "node:fs";
+import exportMessages from "./functions/exportMessages";
 
 config();
 
@@ -34,6 +35,46 @@ class AppRouter {
 		this.router.post("/files", upload.single("file"), this.uploadFile);
 		this.router.post("/files/getFilesAsZip", upload.single("pdf"), this.getFilesAsZip);
 		this.router.post("/files/getFilesAsMultipleZip", upload.array("pdfs"), this.getFilesAsMultipleZip);
+		this.router.get("/clients/:clientName/reports/messages", this.exportMessagesController)
+	}
+
+	async exportMessagesController(req: Request, res: Response) {
+		try {
+			const userId = req.query.userId as string || "*";
+			const format = req.query.format as string;
+			const includeFiles = req.query.includeFiles === "true";
+			const startDate = req.query.startDate as string || "2000-01-01";
+			const endDate = req.query.endDate as string || "2100-01-01";
+
+			if (format !== "txt" && format !== "pdf" && format !== "csv") {
+				return res.status(400).json({ message: "Invalid format" });
+			}
+
+			const outputPath = await exportMessages({
+				clientName: req.params.clientName,
+				format,
+				userId,
+				startDate,
+				endDate,
+				includeFiles,
+			})
+
+			// Send the file of outputPath
+			return res.download(outputPath, (err) => {
+				if (err) {
+					logWithDate("Error sending file", err);
+				}
+
+				fs.rm(outputPath, (err) => {
+					if (err) {
+						logWithDate("Error deleting file", err);
+					}
+				});
+			});
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Something went wrong";
+			return res.status(500).json({ message });
+		}
 	}
 
 	async loadMessages(req: Request, res: Response) {
@@ -468,17 +509,16 @@ class AppRouter {
 
 				const parsedMessage = file
 					? await instance.sendFile({
-							caption: replaceVars(text, contactVars),
-							contact,
-							file: file.buffer,
-							fileName: fileName || file.originalname,
-							mimeType: file.mimetype,
-					  })
+						caption: replaceVars(text, contactVars),
+						contact,
+						file: file.buffer,
+						fileName: fileName || file.originalname,
+						mimeType: file.mimetype,
+					})
 					: await instance.sendText(contact, replaceVars(text, contactVars));
 
 				await axios.post(
-					`${instance.requestURL.replace("/wwebjs", "")}/custom-routes/receive_mm/${
-						instance.whatsappNumber
+					`${instance.requestURL.replace("/wwebjs", "")}/custom-routes/receive_mm/${instance.whatsappNumber
 					}/${contact}`,
 					parsedMessage
 				);
@@ -503,17 +543,16 @@ class AppRouter {
 
 				const parsedMessage = file
 					? await instance.sendFile({
-							caption: replaceVars(text, contactVars),
-							contact,
-							file: file.buffer,
-							fileName: file.name,
-							mimeType: file.mimetype,
-					  })
+						caption: replaceVars(text, contactVars),
+						contact,
+						file: file.buffer,
+						fileName: file.name,
+						mimeType: file.mimetype,
+					})
 					: await instance.sendText(contact, replaceVars(text, contactVars));
 
 				await axios.post(
-					`${instance.requestURL.replace("/wwebjs", "")}/custom-routes/receive_mm/${
-						instance.whatsappNumber
+					`${instance.requestURL.replace("/wwebjs", "")}/custom-routes/receive_mm/${instance.whatsappNumber
 					}/${contact}`,
 					parsedMessage
 				);
