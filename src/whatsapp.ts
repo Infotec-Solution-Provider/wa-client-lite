@@ -75,14 +75,9 @@ class WhatsappInstance {
 					"--disable-gpu",
 				],
 			},
-			webVersionCache: {
-				type: "remote",
-				remotePath:
-					"https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2346.52.html",
-			},
 		});
 
-		schedule("30 7 * * *", async () => {
+		schedule(process.env.CRON_LOAD_AVATARS || "0 */4 * * *", async () => {
 			try {
 				await this.loadAvatars();
 				logWithDate(
@@ -96,7 +91,7 @@ class WhatsappInstance {
 			}
 		});
 
-		schedule("*/2 * * * *", () => this.syncMessagesWithServer());
+		schedule(process.env.CRON_SYNC_MESSAGES || "*/2 * * * *", () => this.syncMessagesWithServer());
 
 		this.buildBlockedNumbers();
 		this.buildAutomaticMessages();
@@ -155,18 +150,18 @@ class WhatsappInstance {
 	private buildClient() {
 		this.client.on("disconnected", async (reason) => {
 			logWithDate("Disconnected =>", reason);
-			/* axios.post(`${this.requestURL}/notify`, { message: "disconnected", reason }); */
+			axios.post(`${this.requestURL}/wwebjs/notify`, { message: "disconnected", reason });
 		});
 
 		this.client.on("change_state", (state) => {
 			logWithDate("Changed State =>", state);
-			/* axios.post(`${this.requestURL}/notify`, { message: "changed state", state }); */
+			axios.post(`${this.requestURL}/wwebjs/notify`, { message: "changed state", state });
 		});
 
 		this.client.on("qr", async (qr) => {
 			try {
 				await axios.post(
-					`${this.requestURL}/qr/${this.whatsappNumber}`,
+					`${this.requestURL}/wwebjs/qr/${this.whatsappNumber}`,
 					{ qr }
 				);
 				logWithDate(
@@ -200,7 +195,7 @@ class WhatsappInstance {
 		this.client.on("authenticated", async () => {
 			try {
 				await axios.post(
-					`${this.requestURL}/auth/${this.whatsappNumber}`,
+					`${this.requestURL}/wwebjs/auth/${this.whatsappNumber}`,
 					{}
 				);
 				this.isAuthenticated = true;
@@ -222,7 +217,7 @@ class WhatsappInstance {
 		this.client.on("ready", async () => {
 			try {
 				await axios.put(
-					`${this.requestURL}/ready/${this.whatsappNumber}`
+					`${this.requestURL}/wwebjs/ready/${this.whatsappNumber}`
 				);
 				this.isReady = true;
 				logWithDate(
@@ -271,7 +266,7 @@ class WhatsappInstance {
 
 	public async initialize() {
 		try {
-			await axios.put(`${this.requestURL}/init/${this.whatsappNumber}`);
+			await axios.put(`${this.requestURL}/wwebjs/init/${this.whatsappNumber}`);
 			logWithDate(
 				`[${this.clientName} - ${this.whatsappNumber}] Init success!`
 			);
@@ -449,7 +444,7 @@ class WhatsappInstance {
 			};
 
 			await axios.post(
-				`${this.requestURL}/update_message/${message.id._serialized}`,
+				`${this.requestURL}/wwebjs/update_message/${message.id._serialized}`,
 				changes
 			);
 			logWithDate(
@@ -781,7 +776,7 @@ class WhatsappInstance {
 
 						await axios
 							.post(
-								`${this.requestURL}/receive_message/${this.whatsappNumber}/${message.FROM}`,
+								`${this.requestURL}/wwebjs/receive_message/${this.whatsappNumber}/${message.FROM}`,
 								parsedMessage
 							)
 							.then(() =>
@@ -797,7 +792,7 @@ class WhatsappInstance {
 						log.setData(() => ({ status: STATUS }));
 						await axios
 							.put(
-								`${this.requestURL}/update_message/${message.FROM}`,
+								`${this.requestURL}/wwebjs/update_message/${message.FROM}`,
 								{ status: STATUS }
 							)
 							.then(() =>
