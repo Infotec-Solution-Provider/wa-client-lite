@@ -82,7 +82,6 @@ export interface ExportMessagesOptions {
     userId: number | string;
     startDate: string;
     endDate: string;
-    includeFiles: boolean;
     format: "txt" | "pdf" | "csv";
 }
 
