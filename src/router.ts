@@ -42,7 +42,6 @@ class AppRouter {
 		try {
 			const userId = req.query.userId as string || "*";
 			const format = req.query.format as string;
-			const includeFiles = req.query.includeFiles === "true";
 			const startDate = req.query.startDate as string || "2000-01-01";
 			const endDate = req.query.endDate as string || "2100-01-01";
 
@@ -50,29 +49,18 @@ class AppRouter {
 				return res.status(400).json({ message: "Invalid format" });
 			}
 
-			const outputPath = await exportMessages({
+			const savedFilename = await exportMessages({
 				clientName: req.params.clientName,
 				format,
 				userId,
 				startDate,
 				endDate,
-				includeFiles,
-			})
-
-			// Send the file of outputPath
-			return res.download(outputPath, (err) => {
-				if (err) {
-					logWithDate("Error sending file", err);
-				}
-
-				fs.rm(outputPath, (err) => {
-					if (err) {
-						logWithDate("Error deleting file", err);
-					}
-				});
 			});
+
+			return res.status(201).json({ filename: savedFilename });
 		} catch (err) {
-			const message = err instanceof Error ? err.message : "Something went wrong";
+			const message = err instanceof Error ? err.message : typeof err === "string" ? err : "Something went wrong";
+
 			return res.status(500).json({ message });
 		}
 	}
@@ -218,13 +206,12 @@ class AppRouter {
 				return res.status(404).json({ message: "File not found" });
 			}
 			const mimeType = mime.getType(searchFilePath);
-			const file = readFileSync(searchFilePath);
 			const haveUUID = isUUID(fileName.split("_")[0]);
 			const fileNameWithoutUUID = haveUUID ? fileName.split("_").slice(1).join("_") : fileName;
 
 			res.setHeader("Content-Disposition", `inline; filename="${fileNameWithoutUUID}"`);
 			mimeType && res.setHeader("Content-Type", mimeType);
-			res.end(file);
+			res.download(searchFilePath)
 
 			logWithDate("Get file success =>", fileName);
 		} catch (err) {
