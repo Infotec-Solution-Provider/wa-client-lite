@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { mkdir, writeFile } from "node:fs/promises";
 import { stringify } from "csv-stringify/sync";
 import { createWriteStream } from "node:fs";
-import { createTaskQueue, decodeSafeURI, zipFolder } from "../utils";
+import { createTaskQueue, decodeSafeURI, filesPath, zipFolder } from "../utils";
 import { Pool } from "mysql2/promise";
 import pdf from "html-pdf";
 
@@ -29,9 +29,9 @@ async function exportMessages({
     const users: Map<number, InpulseUser> = await fetchUsers(pool);
     const chats: Map<number, ChatToExport> = mapChats(messages, users);
 
-    const maxConcurrencyPdf = Number(process.env.EXPORT_MESSAGES_CONCURRENCY_PDF || 2);
-    const maxConcurrencyTxt = Number(process.env.EXPORT_MESSAGES_CONCURRENCY || 100);
-    const maxMessagesPdf = Number(process.env.EXPORT_MESSAGES_MAX_COUNT_PDF || 500);
+    const maxConcurrencyPdf = Number(process.env.EXPORT_MESSAGES_CONCURRENCY_PDF) || 2;
+    const maxConcurrencyTxt = Number(process.env.EXPORT_MESSAGES_CONCURRENCY) || 100;
+    const maxMessagesPdf = Number(process.env.EXPORT_MESSAGES_MAX_COUNT_PDF) || 500;
 
     if (format === "pdf" && messages.length > maxMessagesPdf) {
         throw new Error("Muitas mensagens para processar. \nPor favor, selecione outro formato de exportação ou um intervalo de datas menor.");
@@ -56,7 +56,12 @@ async function exportMessages({
     await taskQueue.waitForCompletion();
     const outputPath = await zipFolder(chatsDir, chatsDir + ".zip");
 
-    return outputPath;
+    const saveFilename = `${clientName}_${now}.zip`;
+    const savePath = `${filesPath}/media/${saveFilename}`;
+
+    await writeFile(savePath, outputPath);
+
+    return saveFilename;
 }
 
 async function fetchMessages(userId: string | number, startDate: string, endDate: string, pool: Pool) {
@@ -140,8 +145,8 @@ function mapChats(messages: SavedMessage[], users: Map<number, InpulseUser>) {
     });
 
     chats.forEach(chat => {
-        if (chat.getMessages().length > 500) {
-            chat.getMessages().splice(0, chat.getMessages().length - 500);
+        if (chat.getMessages().length > Number(process.env.EXPORT_MESSAGES_MAX_CHAT_COUNT) || 1000) {
+            chat.getMessages().splice(0, chat.getMessages().length - Number(process.env.EXPORT_MESSAGES_MAX_CHAT_COUNT) || 1000);
         }
     })
 
@@ -156,16 +161,18 @@ export function toDownloadLink(message: SavedMessageWithFile, clientName: string
 
 function writeChatToPdf(clientName: string, chat: ChatToExport, tempDir: string): Promise<void> {
     return new Promise(async (resolve, reject) => {
+        console.log("Generating pdf for chat", chat.getContact().phone);
         const html = chat.toHtml(clientName);
 
         pdf.create(html, { format: 'A4' }).toFile(`${tempDir}/${chat.getContact().phone}.pdf`, (err) => {
             if (err) {
                 reject(err);
             }
+            console.log("Pdf generated for chat", chat.getContact().phone);
             resolve();
         });
 
-        setTimeout(() => reject("Timeout"), 10000);
+        setTimeout(() => reject(new Error(`Tempo excedido para montar o pdf da conversa: ${chat.getContact().phone}`)), Number(process.env.EXPORT_MESSAGES_TIMEOUT_MOUNT_PDF) || 30000);
     });
 }
 
