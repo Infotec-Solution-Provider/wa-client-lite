@@ -31,7 +31,9 @@ class AppRouter {
 		this.router.post("/clients/:from/messages/:to", upload.single("file"), this.sendMessage);
 		this.router.post("/clients/:from/mass-messages", upload.single("file"), this.sendMassMessages);
 		this.router.get("/files/:filename", this.getFile);
+		this.router.post("/files/get/multiple", upload.none(), this.getMultipleFiles);
 		this.router.post("/files", upload.single("file"), this.uploadFile);
+		this.router.post("/files/multiple", upload.array("file"), this.uploadMultipleFiles);
 		this.router.post("/files/getFilesAsZip", upload.single("pdf"), this.getFilesAsZip);
 		this.router.post("/files/getFilesAsMultipleZip", upload.array("pdfs"), this.getFilesAsMultipleZip);
 	}
@@ -187,8 +189,59 @@ class AppRouter {
 
 			logWithDate("Get file success =>", fileName);
 		} catch (err) {
-			// Log and send error response
 			logWithDate("Get file failure =>", err);
+			res.status(500).json({ message: "Something went wrong" });
+		}
+	}
+
+	async getMultipleFiles(req: Request, res: Response) {
+		try {
+			const fileNames = req.body.files as string[];
+
+			if (!fileNames || fileNames.length === 0) {
+				return res.status(400).json({ message: "No files specified" });
+			}
+
+			const filesPath = process.env.FILES_DIRECTORY!;
+			const filesToSend: {
+				fileName: string;
+				originalFileName: string;
+				fileContent: Buffer;
+				mimeType: string | null;
+			}[] = [];
+
+			fileNames.forEach((fileName) => {
+				const searchFilePath = join(filesPath, "/media", fileName);
+
+				if (!existsSync(searchFilePath)) {
+					logWithDate(`File not found: ${fileName}`);
+					return;
+				}
+
+				const mimeType = mime.getType(searchFilePath);
+				const fileContent = readFileSync(searchFilePath);
+				const haveUUID = isUUID(fileName.split("_")[0]);
+				const fileNameWithoutUUID = haveUUID ? fileName.split("_").slice(1).join("_") : fileName;
+
+				filesToSend.push({ fileName: fileName, originalFileName: fileNameWithoutUUID, fileContent, mimeType });
+			});
+
+			if (filesToSend.length === 0) {
+				return res.status(404).json({ message: "No valid files found" });
+			}
+
+			res.status(200).json({
+				files: filesToSend.map((file) => ({
+					fileName: file.fileName,
+					originalFileName: file.originalFileName,
+					mimeType: file.mimeType,
+					content: file.fileContent,
+				})),
+			});
+
+			logWithDate("Get file success =>", fileNames);
+		} catch (err) {
+			logWithDate("Get multiple files failure =>", err);
 			res.status(500).json({ message: "Something went wrong" });
 		}
 	}
@@ -422,6 +475,35 @@ class AppRouter {
 			res.status(201).json({ filename: generatedName });
 		} catch (err) {
 			logWithDate("Upload file failure => ", err);
+			res.status(500).json({ message: "Something went wrong" });
+		}
+	}
+
+	async uploadMultipleFiles(req: Request, res: Response) {
+		try {
+			const files = req.files as Express.Multer.File[];
+
+			if (!files || files.length === 0) {
+				return res.status(400).json({ message: "No files uploaded" });
+			}
+
+			const filesPath = process.env.FILES_DIRECTORY!;
+			const uploadedFiles = [];
+
+			files.forEach((file) => {
+				const uuid = randomUUID();
+				const filename = decodeURIComponent(file.originalname).split(".")[0];
+				const ext = decodeURIComponent(file.originalname).split(".")[1];
+				const generatedName = `${uuid}_${filename}.${ext}`;
+				const filePath = join(filesPath, "/media", generatedName);
+
+				writeFileSync(filePath, file.buffer);
+				uploadedFiles.push({ filename: generatedName, originalName: file.originalname });
+			});
+
+			res.status(201).json({ uploadedFiles });
+		} catch (err) {
+			logWithDate("Upload multiple files failure => ", err);
 			res.status(500).json({ message: "Something went wrong" });
 		}
 	}
