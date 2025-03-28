@@ -1,11 +1,5 @@
 import axios from "axios";
-import {
-	ConnectionOptions,
-	FieldPacket,
-	Pool,
-	RowDataPacket,
-	createPool,
-} from "mysql2/promise";
+import { ConnectionOptions, FieldPacket, Pool, RowDataPacket, createPool } from "mysql2/promise";
 import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
 import {
 	encodeParsedMessage,
@@ -34,10 +28,7 @@ class WhatsappInstance {
 	public isReady: boolean = false;
 	public connectionParams: ConnectionOptions;
 	public blockedNumbers: Array<string> = [];
-	public autoMessageCounters: Map<
-		number,
-		Array<{ number: string; count: number }>
-	> = new Map();
+	public autoMessageCounters: Map<number, Array<{ number: string; count: number }>> = new Map();
 	public awaitingMessages: {
 		numbers: Array<string>;
 		messages: Array<WAWebJS.Message>;
@@ -46,12 +37,7 @@ class WhatsappInstance {
 	private contactQueues: Map<string, Array<() => Promise<void>>> = new Map();
 	private contactProcessing: Map<string, boolean> = new Map();
 
-	constructor(
-		clientName: string,
-		whatsappNumber: string,
-		requestURL: string,
-		connection: ConnectionOptions
-	) {
+	constructor(clientName: string, whatsappNumber: string, requestURL: string, connection: ConnectionOptions) {
 		this.clientName = clientName;
 		this.whatsappNumber = whatsappNumber;
 		this.requestURL = requestURL;
@@ -75,24 +61,14 @@ class WhatsappInstance {
 					"--disable-gpu",
 				],
 			},
-			webVersionCache: {
-				type: "remote",
-				remotePath:
-					"https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2410.1.html",
-			},
 		});
 
 		schedule("30 7 * * *", async () => {
 			try {
 				await this.loadAvatars();
-				logWithDate(
-					`[${this.clientName} - ${this.whatsappNumber}] Avatars loaded successfully.`
-				);
+				logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Avatars loaded successfully.`);
 			} catch (err: any) {
-				logWithDate(
-					`[${this.clientName} - ${this.whatsappNumber}] Avatars loading failure =>`,
-					err
-				);
+				logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Avatars loading failure =>`, err);
 			}
 		});
 
@@ -114,9 +90,7 @@ class WhatsappInstance {
 		while (this.contactQueues.get(contactNumber)?.length) {
 			const task = this.contactQueues.get(contactNumber)!.shift();
 			if (task) {
-				logWithDate(
-					`[${this.clientName} - ${this.whatsappNumber}] Processing ${type} for ${contactNumber}...`
-				);
+				logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Processing ${type} for ${contactNumber}...`);
 				await task();
 			}
 		}
@@ -124,11 +98,7 @@ class WhatsappInstance {
 		this.contactProcessing.set(contactNumber, false);
 	}
 
-	private enqueueProcessing(
-		task: () => Promise<void>,
-		type: string,
-		contactNumber: string
-	) {
+	private enqueueProcessing(task: () => Promise<void>, type: string, contactNumber: string) {
 		if (!this.contactQueues.has(contactNumber)) {
 			this.contactQueues.set(contactNumber, []);
 			this.contactProcessing.set(contactNumber, false);
@@ -138,17 +108,11 @@ class WhatsappInstance {
 		this.processContactQueue(contactNumber, type);
 	}
 
-	public enqueueMessageProcessing(
-		task: () => Promise<void>,
-		contactNumber: string
-	) {
+	public enqueueMessageProcessing(task: () => Promise<void>, contactNumber: string) {
 		this.enqueueProcessing(task, "message", contactNumber);
 	}
 
-	public enqueueStatusProcessing(
-		task: () => Promise<void>,
-		contactNumber: string
-	) {
+	public enqueueStatusProcessing(task: () => Promise<void>, contactNumber: string) {
 		this.enqueueProcessing(task, "status", contactNumber);
 	}
 
@@ -165,105 +129,69 @@ class WhatsappInstance {
 
 		this.client.on("qr", async (qr) => {
 			try {
-				await axios.post(
-					`${this.requestURL}/qr/${this.whatsappNumber}`,
-					{ qr }
-				);
-				logWithDate(
-					`[${this.clientName} - ${this.whatsappNumber
-					}] QR success => ${qr.slice(0, 30)}...`
-				);
+				await axios.post(`${this.requestURL}/qr/${this.whatsappNumber}`, { qr });
+				logWithDate(`[${this.clientName} - ${this.whatsappNumber}] QR success => ${qr.slice(0, 30)}...`);
 			} catch (err: any) {
 				logWithDate(
 					`[${this.clientName} - ${this.whatsappNumber}] QR failure =>`,
-					err?.response
-						? err.response.status
-						: err.request
-							? err.request._currentUrl
-							: err
+					err?.response ? err.response.status : err.request ? err.request._currentUrl : err
 				);
 			}
 		});
 
 		this.client.on("loading_screen", (percent, message) => {
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Loading => ${message} ${percent}%`
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Loading => ${message} ${percent}%`);
 		});
 
 		this.client.on("change_state", (state) => {
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Chage state => ${state}`
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Chage state => ${state}`);
 		});
 
 		this.client.on("authenticated", async () => {
 			try {
-				await axios.post(
-					`${this.requestURL}/auth/${this.whatsappNumber}`,
-					{}
-				);
+				await axios.post(`${this.requestURL}/auth/${this.whatsappNumber}`, {});
 				this.isAuthenticated = true;
-				logWithDate(
-					`[${this.clientName} - ${this.whatsappNumber}] Auth success!`
-				);
+				logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Auth success!`);
 			} catch (err: any) {
 				logWithDate(
 					`[${this.clientName} - ${this.whatsappNumber}] Auth failure =>`,
-					err.response
-						? err.response.status
-						: err.request
-							? err.request._currentUrl
-							: err
+					err.response ? err.response.status : err.request ? err.request._currentUrl : err
 				);
 			}
 		});
 
 		this.client.on("ready", async () => {
 			try {
-				await axios.put(
-					`${this.requestURL}/ready/${this.whatsappNumber}`
-				);
+				await axios.put(`${this.requestURL}/ready/${this.whatsappNumber}`);
 				this.isReady = true;
-				logWithDate(
-					`[${this.clientName} - ${this.whatsappNumber}] Ready success!`
-				);
+				logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Ready success!`);
 			} catch (err: any) {
 				logWithDate(
 					`[${this.clientName} - ${this.whatsappNumber}] Ready failure =>`,
-					err.response
-						? err.response.status
-						: err.request
-							? err.request._currentUrl
-							: err
+					err.response ? err.response.status : err.request ? err.request._currentUrl : err
 				);
 			}
 		});
 
 		this.client.on("message", (message) => this.onReceiveMessage(message));
-		this.client.on("message_edit", (message) =>
-			this.onEditMessage(message)
-		);
-		this.client.on("message_ack", (status) =>
-			this.onReceiveMessageStatus(status)
-		);
+		this.client.on("message_edit", (message) => this.onEditMessage(message));
+		this.client.on("message_ack", (status) => this.onReceiveMessageStatus(status));
 	}
 
 	private async buildBlockedNumbers() {
-		const [rows]: [RowDataPacket[], FieldPacket[]] =
-			await whatsappClientPool.query(
-				`SELECT * FROM blocked_numbers WHERE instance_number = ?`,
-				[this.whatsappNumber]
-			);
+		const [rows]: [RowDataPacket[], FieldPacket[]] = await whatsappClientPool.query(
+			`SELECT * FROM blocked_numbers WHERE instance_number = ?`,
+			[this.whatsappNumber]
+		);
 
 		this.blockedNumbers = rows.map((r) => r.blocked_number);
 	}
 
 	private async buildAutomaticMessages() {
-		const SELECT_BOTS_QUERY =
-			"SELECT * FROM automatic_messages WHERE instance_number = ? AND is_active = 1";
-		const [rows]: [RowDataPacket[], FieldPacket[]] =
-			await whatsappClientPool.query(SELECT_BOTS_QUERY, [this.whatsappNumber]);
+		const SELECT_BOTS_QUERY = "SELECT * FROM automatic_messages WHERE instance_number = ? AND is_active = 1";
+		const [rows]: [RowDataPacket[], FieldPacket[]] = await whatsappClientPool.query(SELECT_BOTS_QUERY, [
+			this.whatsappNumber,
+		]);
 		const autoMessages = rows as DBAutomaticMessage[];
 
 		this.autoMessages.push(...autoMessages);
@@ -272,17 +200,11 @@ class WhatsappInstance {
 	public async initialize() {
 		try {
 			await axios.put(`${this.requestURL}/init/${this.whatsappNumber}`);
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Init success!`
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Init success!`);
 		} catch (err: any) {
 			logWithDate(
 				`[${this.clientName} - ${this.whatsappNumber}] Init failure =>`,
-				err.response
-					? err.response.status
-					: err.request
-						? err.request._currentUrl
-						: err
+				err.response ? err.response.status : err.request ? err.request._currentUrl : err
 			);
 		} finally {
 			await this.client.initialize();
@@ -291,61 +213,40 @@ class WhatsappInstance {
 
 	public async onReceiveMessage(message: WAWebJS.Message) {
 		if (message.from == "status@broadcast") {
-			return
+			return;
 		}
 
 		this.enqueueMessageProcessing(async () => {
-			const log = new Log<any>(
-				this.client,
-				this.clientName,
-				"receive-message",
-				`${message.id._serialized}`,
-				{ message }
-			);
+			const log = new Log<any>(this.client, this.clientName, "receive-message", `${message.id._serialized}`, {
+				message,
+			});
 			try {
-				const blockedTypes = [
-					"e2e_notification",
-					"notification_template",
-					"call_log",
-					"gp2",
-				];
+				const blockedTypes = ["e2e_notification", "notification_template", "call_log", "gp2"];
 				const fromNow = isMessageFromNow(message);
 				const chat = await message.getChat();
-				const contact = await chat.getContact()
+				const contact = await chat.getContact();
 
 				if (!contact) {
-					return
+					return;
 				}
 
 				const contactNumber = contact.number;
 
 				const isStatus = message.isStatus;
 				const isBlackListedType = blockedTypes.includes(message.type);
-				const isBlackListedContact =
-					this.blockedNumbers.includes(contactNumber);
+				const isBlackListedContact = this.blockedNumbers.includes(contactNumber);
 				const isBlackListed = isBlackListedType || isBlackListedContact;
 				const isValidNumber = validatePhoneStr(contactNumber);
 
 				if (!isValidNumber) {
-					return
+					return;
 				}
 
 				for (const autoMessage of this.autoMessages) {
-					await runAutoMessage(
-						this,
-						autoMessage,
-						message,
-						contactNumber,
-
-					);
+					await runAutoMessage(this, autoMessage, message, contactNumber);
 				}
 
-				if (
-					!chat.isGroup &&
-					fromNow &&
-					!isBlackListed &&
-					!isStatus
-				) {
+				if (!chat.isGroup && fromNow && !isBlackListed && !isStatus) {
 					const parsedMessage = await parseMessage(message);
 					log.setData((data) => ({ ...data, parsedMessage }));
 
@@ -355,25 +256,20 @@ class WhatsappInstance {
 					await this.saveMessage(parsedMessage, contactNumber);
 
 					await axios
-						.post(
-							`${this.requestURL}/receive_message/${this.whatsappNumber}/${contactNumber}`,
-							parsedMessage
-						)
+						.post(`${this.requestURL}/receive_message/${this.whatsappNumber}/${contactNumber}`, parsedMessage)
 						.catch((err: any) => {
 							console.log(
 								err.response
 									? {
-										status: err.response.status,
-										data: err.response.data,
-									}
+											status: err.response.status,
+											data: err.response.data,
+									  }
 									: err.message
 							);
 						});
 
 					const savedMessage = await this.pool
-						.query("SELECT * FROM w_mensagens WHERE ID = ?", [
-							parsedMessage!.ID,
-						])
+						.query("SELECT * FROM w_mensagens WHERE ID = ?", [parsedMessage!.ID])
 						.then(([rows]: any) => {
 							return rows[0];
 						});
@@ -386,9 +282,7 @@ class WhatsappInstance {
 						});
 					}
 
-					logWithDate(
-						`[${this.clientName} - ${this.whatsappNumber}] Message success => ${message.id._serialized}`
-					);
+					logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Message success => ${message.id._serialized}`);
 				}
 			} catch (err: any) {
 				log.setError(err);
@@ -405,17 +299,9 @@ class WhatsappInstance {
 	public async onReceiveMessageStatus(message: WAWebJS.Message) {
 		this.enqueueStatusProcessing(async () => {
 			try {
-				const status =
-					["PENDING", "SENT", "RECEIVED", "READ", "PLAYED"][
-					message.ack
-					] || "ERROR";
+				const status = ["PENDING", "SENT", "RECEIVED", "READ", "PLAYED"][message.ack] || "ERROR";
 
-				await axios
-					.put(
-						`${this.requestURL}/update_message/${message.id._serialized}`,
-						{ status }
-					)
-					.catch(() => null);
+				await axios.put(`${this.requestURL}/update_message/${message.id._serialized}`, { status }).catch(() => null);
 				await this.updateMessage(message.id._serialized, {
 					SYNC_STATUS: true,
 				});
@@ -425,11 +311,7 @@ class WhatsappInstance {
 			} catch (err: any) {
 				logWithDate(
 					`[${this.clientName} - ${this.whatsappNumber}] Status failure =>`,
-					err.response
-						? err.response.status
-						: err.request
-							? err.request._currentUrl
-							: err
+					err.response ? err.response.status : err.request ? err.request._currentUrl : err
 				);
 				await this.updateMessage(message.id._serialized, {
 					SYNC_STATUS: false,
@@ -448,18 +330,10 @@ class WhatsappInstance {
 				TIMESTAMP,
 			};
 
-			await axios.post(
-				`${this.requestURL}/update_message/${message.id._serialized}`,
-				changes
-			);
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Message edit success => ${message.id._serialized}`
-			);
+			await axios.post(`${this.requestURL}/update_message/${message.id._serialized}`, changes);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Message edit success => ${message.id._serialized}`);
 		} catch (err: any) {
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Message edit failure => `,
-				err
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Message edit failure => `, err);
 		}
 	}
 
@@ -490,33 +364,22 @@ class WhatsappInstance {
 		}
 	}
 
-	public async sendText(
-		contact: string,
-		text: string,
-		quotedMessageId?: string
-	) {
-		const log = new Log<any>(
-			this.client,
-			this.clientName,
-			"send-text",
-			`${Date.now()}`,
-			{ contact, text, quotedMessageId }
-		);
+	public async sendText(contact: string, text: string, quotedMessageId?: string) {
+		const log = new Log<any>(this.client, this.clientName, "send-text", `${Date.now()}`, {
+			contact,
+			text,
+			quotedMessageId,
+		});
 		try {
 			log.event("started sendText function");
 
 			const numberId = await this.client.getNumberId(contact);
 			const chatId = numberId && numberId._serialized;
 			log.event("fetched contact's whatsapp id");
-			log.setData(data => ({ ...data, chatId }))
-
+			log.setData((data) => ({ ...data, chatId }));
 
 			if (chatId) {
-				const sentMessage = await this.client.sendMessage(
-					chatId,
-					text,
-					{ quotedMessageId }
-				);
+				const sentMessage = await this.client.sendMessage(chatId, text, { quotedMessageId });
 				log.event("sent whatsapp message");
 				log.setData((data) => ({ ...data, sentMessage }));
 
@@ -525,9 +388,7 @@ class WhatsappInstance {
 				log.setData((data) => ({ ...data, parsedMessage }));
 
 				if (parsedMessage) {
-					logWithDate(
-						`[${this.clientName} - ${this.whatsappNumber}] Send text success => ${parsedMessage.ID}`
-					);
+					logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Send text success => ${parsedMessage.ID}`);
 				}
 
 				return parsedMessage;
@@ -535,45 +396,23 @@ class WhatsappInstance {
 		} catch (err: any) {
 			log.setError(err);
 			log.save();
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Send text failure =>`,
-				err
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Send text failure =>`, err);
 		}
 	}
 
 	public async sendFile(options: SendFileOptions) {
-		const log = new Log<any>(
-			this.client,
-			this.clientName,
-			"send-file",
-			`${Date.now()}`,
-			{ options }
-		);
+		const log = new Log<any>(this.client, this.clientName, "send-file", `${Date.now()}`, { options });
 		try {
-			const {
-				contact,
-				file,
-				mimeType,
-				fileName,
-				caption,
-				quotedMessageId,
-				isAudio,
-			} = options;
+			const { contact, file, mimeType, fileName, caption, quotedMessageId, isAudio } = options;
 			let formatedFile: unknown & any = file.toString("base64");
 
 			if (isAudio === "true") {
-				formatedFile = (
-					(await formatToOpusAudio(file)) as any
-				).toString("base64");
+				formatedFile = ((await formatToOpusAudio(file)) as any).toString("base64");
 			}
 
 			const chatId = `${contact}@c.us`;
-			const media = new WAWebJS.MessageMedia(
-				mimeType,
-				formatedFile,
-				fileName
-			);
+			const media = new WAWebJS.MessageMedia(mimeType, formatedFile, fileName);
+
 			const sentMessage = await this.client.sendMessage(chatId, media, {
 				caption,
 				quotedMessageId,
@@ -584,19 +423,30 @@ class WhatsappInstance {
 			log.setData((data) => ({ ...data, parsedMessage }));
 
 			if (parsedMessage) {
-				logWithDate(
-					`[${this.clientName} - ${this.whatsappNumber}] Send file success => ${parsedMessage.ID}`
-				);
+				logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Send file success => ${parsedMessage.ID}`);
 			}
 
 			return parsedMessage;
 		} catch (err: any) {
 			log.setError(err);
 			log.save();
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Send file failure  =>`,
-				err
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Send file failure  =>`, err);
+		}
+	}
+
+	public async editMessage(messageId: string, msgText: string) {
+		try {
+			const message = await this.client.getMessageById("true_555131346499@c.us_3EB07164BD22F71A787218");
+			if (!message) {
+				throw new Error(`Message with ID ${messageId} not found.`);
+			}
+			const editedMsg = await message.edit(msgText);
+			console.log(editedMsg);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Edit message success => ${messageId}`);
+			return { sucess: true };
+		} catch (err) {
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Edit message failure =>`, err);
+			throw err;
 		}
 	}
 
@@ -646,9 +496,7 @@ class WhatsappInstance {
             `;
 
 			const [rows] = await this.pool.query(SELECT_QUERY, [number]);
-			const findContact = (
-				rows as Array<{ RAZAO: string; CNPJ: string; NOME: string }>
-			)[0];
+			const findContact = (rows as Array<{ RAZAO: string; CNPJ: string; NOME: string }>)[0];
 
 			vars.cliente_razao = findContact.RAZAO;
 			vars.cliente_cnpj = findContact.CNPJ;
@@ -671,13 +519,7 @@ class WhatsappInstance {
 	private async saveMessage(message: ParsedMessage, from: string) {
 		message = encodeParsedMessage(message);
 
-		const log = new Log<any>(
-			this.client,
-			this.clientName,
-			"save-local-message",
-			message.ID,
-			{ message }
-		);
+		const log = new Log<any>(this.client, this.clientName, "save-local-message", message.ID, { message });
 		try {
 			const query = `
 				INSERT INTO messages (
@@ -739,40 +581,28 @@ class WhatsappInstance {
 				throw err;
 			}
 
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Message saved successfully => ${message.ID}`
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Message saved successfully => ${message.ID}`);
 		} catch (err: any) {
 			log.setError(err);
 			log.save();
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Save message failure =>`,
-				err
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Save message failure =>`, err);
 		}
 	}
 
 	private async syncMessagesWithServer() {
 		try {
-			const [rows]: [RowDataPacket[], FieldPacket[]] =
-				await whatsappClientPool.query(
-					`
+			const [rows]: [RowDataPacket[], FieldPacket[]] = await whatsappClientPool.query(
+				`
 				SELECT * FROM messages 
 				WHERE (SYNC_MESSAGE = 0 OR SYNC_STATUS = 0) 
 				AND INSTANCE = ?
 			`,
-					[`${this.clientName}_${this.whatsappNumber}`]
-				);
+				[`${this.clientName}_${this.whatsappNumber}`]
+			);
 
 			for (const message of rows) {
 				const { ID, SYNC_MESSAGE, SYNC_STATUS, STATUS } = message;
-				const log = new Log<any>(
-					this.client,
-					this.clientName,
-					"sync-message",
-					ID,
-					{}
-				);
+				const log = new Log<any>(this.client, this.clientName, "sync-message", ID, {});
 				try {
 					// Sincronizar mensagem com o servidor
 					if (!SYNC_MESSAGE) {
@@ -780,10 +610,7 @@ class WhatsappInstance {
 						log.setData(() => ({ parsedMessage }));
 
 						await axios
-							.post(
-								`${this.requestURL}/receive_message/${this.whatsappNumber}/${message.FROM}`,
-								parsedMessage
-							)
+							.post(`${this.requestURL}/receive_message/${this.whatsappNumber}/${message.FROM}`, parsedMessage)
 							.then(() =>
 								this.updateMessage(ID, {
 									SYNC_MESSAGE: true,
@@ -796,42 +623,25 @@ class WhatsappInstance {
 					if (SYNC_MESSAGE && !SYNC_STATUS) {
 						log.setData(() => ({ status: STATUS }));
 						await axios
-							.put(
-								`${this.requestURL}/update_message/${message.FROM}`,
-								{ status: STATUS }
-							)
-							.then(() =>
-								this.updateMessage(ID, { SYNC_STATUS: true })
-							);
+							.put(`${this.requestURL}/update_message/${message.FROM}`, { status: STATUS })
+							.then(() => this.updateMessage(ID, { SYNC_STATUS: true }));
 					}
 
-					logWithDate(
-						`[${this.clientName} - ${this.whatsappNumber}] Sync message success: ${ID}`
-					);
+					logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Sync message success: ${ID}`);
 				} catch (err: any) {
 					log.setError(err);
 					log.save();
-					logWithDate(
-						`[${this.clientName} - ${this.whatsappNumber}] Sync message failure =>`,
-						err?.message
-					);
+					logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Sync message failure =>`, err?.message);
 				}
 			}
 		} catch (err: any) {
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Sync messages failure =>`,
-				err?.message
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Sync messages failure =>`, err?.message);
 		}
 	}
 
 	private async updateMessage(
 		id: string,
-		{
-			SYNC_STATUS,
-			SYNC_MESSAGE,
-			STATUS,
-		}: { SYNC_STATUS?: boolean; SYNC_MESSAGE?: boolean; STATUS?: string }
+		{ SYNC_STATUS, SYNC_MESSAGE, STATUS }: { SYNC_STATUS?: boolean; SYNC_MESSAGE?: boolean; STATUS?: string }
 	) {
 		try {
 			const query = `UPDATE messages SET STATUS = COALESCE(?, STATUS), SYNC_STATUS = COALESCE(?, SYNC_STATUS), SYNC_MESSAGE = COALESCE(?, SYNC_MESSAGE) WHERE ID = ?;`;
@@ -845,14 +655,9 @@ class WhatsappInstance {
 
 			await whatsappClientPool.query(query, params);
 
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Message updated successfully => ${id}`
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Message updated successfully => ${id}`);
 		} catch (err) {
-			logWithDate(
-				`[${this.clientName} - ${this.whatsappNumber}] Update message failure =>`,
-				err
-			);
+			logWithDate(`[${this.clientName} - ${this.whatsappNumber}] Update message failure =>`, err);
 		}
 	}
 }

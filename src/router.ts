@@ -29,6 +29,7 @@ class AppRouter {
 		this.router.get("/clients/:from/groups", this.loadGroups);
 		this.router.get("/clients/:from/validate-number/:to", this.validateNumber);
 		this.router.post("/clients/:from/messages/:to", upload.single("file"), this.sendMessage);
+		this.router.post("/clients/:from/edit-message/:messageId", upload.none(), this.editMessage);
 		this.router.post("/clients/:from/mass-messages", upload.single("file"), this.sendMassMessages);
 		this.router.get("/files/:filename", this.getFile);
 		this.router.post("/files/get/multiple", upload.none(), this.getMultipleFiles);
@@ -148,6 +149,23 @@ class AppRouter {
 			}
 		} catch (err) {
 			logWithDate("[router.js] Send message failure =>", err);
+		}
+	}
+
+	async editMessage(req: Request, res: Response) {
+		try {
+			const { from, messageId } = req.params;
+			const instance = instances.find(from);
+
+			if (!instance) {
+				return res.status(404).json({ message: "Instance not found" });
+			}
+
+			const response = await instance.editMessage(messageId, req.body.message);
+			res.status(200).json(response);
+		} catch (err) {
+			logWithDate("[router.js] Edit message failure =>", err);
+			return res.status(500).json({ message: "Failed to edit message", error: err });
 		}
 	}
 
