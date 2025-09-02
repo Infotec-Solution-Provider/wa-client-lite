@@ -31,7 +31,7 @@
     "pdfkit": "^0.16.0",
     "uuid": "^9.0.1",
     "wa-client-lite": "file:",
-    "whatsapp-web.js": "^1.26.0"
+    "whatsapp-web.js": "^1.33.2"
   },
   "devDependencies": {
     "@types/axios": "^0.14.0",
