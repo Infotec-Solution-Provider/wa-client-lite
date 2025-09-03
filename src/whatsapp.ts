@@ -150,12 +150,10 @@ class WhatsappInstance {
 	private buildClient() {
 		this.client.on("disconnected", async (reason) => {
 			logWithDate("Disconnected =>", reason);
-			axios.post(`${this.requestURL}/notify`, { message: "disconnected", reason });
 		});
 
 		this.client.on("change_state", (state) => {
 			logWithDate("Changed State =>", state);
-			axios.post(`${this.requestURL}/notify`, { message: "changed state", state });
 		});
 
 		this.client.on("qr", async (qr) => {
