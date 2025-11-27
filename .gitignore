@@ -3,7 +3,6 @@ node_modules
 .wwebjs_auth
 .wwebjs_cache
 files/*
-package-lock.json
 temp/*
 dist/files/*
 dist/temp/*
