@@ -1,4 +1,5 @@
 import axios from "axios";
+import { extension } from "mime-types";
 import {
 	ConnectionOptions,
 	FieldPacket,
@@ -6,7 +7,17 @@ import {
 	RowDataPacket,
 	createPool,
 } from "mysql2/promise";
+import { schedule } from "node-cron";
+import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
+import runAutoMessage from "./build-automatic-messages";
+import whatsappClientPool from "./connection";
+import loadAvatars from "./functions/loadAvatars";
+import loadMessages from "./functions/loadMessages";
+import Log from "./log";
+import { DBAutomaticMessage, ParsedMessage, SendFileOptions } from "./types";
 import {
 	encodeParsedMessage,
 	formatToOpusAudio,
@@ -16,14 +27,8 @@ import {
 	parseMessage,
 	validatePhoneStr,
 } from "./utils";
-import { DBAutomaticMessage, ParsedMessage, SendFileOptions } from "./types";
-import loadMessages from "./functions/loadMessages";
-import loadAvatars from "./functions/loadAvatars";
-import { schedule } from "node-cron";
-import runAutoMessage from "./build-automatic-messages";
-import Log from "./log";
-import whatsappClientPool from "./connection";
 
+const filesPath = process.env.FILES_DIRECTORY!;
 class WhatsappInstance {
 	public readonly requestURL: string;
 	public readonly client: Client;
@@ -344,6 +349,7 @@ class WhatsappInstance {
 				fromNow &&
 				!isBlackListed &&
 				!isStatus
+				&& this.clientName !== 'infotec'
 			) {
 				const parsedMessage = await parseMessage(message);
 				log.setData((data) => ({ ...data, parsedMessage }));
@@ -548,8 +554,9 @@ class WhatsappInstance {
 			`${Date.now()}`,
 			{ options }
 		);
+
 		try {
-			const {
+			let {
 				contact,
 				file,
 				mimeType,
@@ -558,39 +565,75 @@ class WhatsappInstance {
 				quotedMessageId,
 				isAudio,
 			} = options;
-			let formatedFile: unknown & any = file.toString("base64");
-
-			if (isAudio === "true") {
-				formatedFile = (
-					(await formatToOpusAudio(file)) as any
-				).toString("base64");
-			}
 
 			const chatId = `${contact}@c.us`;
-			const media = new WAWebJS.MessageMedia(
-				mimeType,
-				formatedFile,
-				fileName
-			);
-			const sentMessage = await this.client.sendMessage(chatId, media, {
-				caption,
-				quotedMessageId,
-				sendAudioAsVoice: !!isAudio,
-			});
+			const isAudioBool = isAudio === "true";
+
+			const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+
+			let formatedFile: Buffer = file;
+
+			if (isAudioBool) {
+				formatedFile = await formatToOpusAudio(file) as Buffer;
+
+				mimeType = "audio/mpeg";
+
+				const baseName = fileName
+					? fileName.replace(/\.[^.]+$/, "")
+					: "audio";
+				fileName = `${baseName}.mp3`;
+			}
+
+			let sentMessage;
+
+			if (formatedFile.length > MAX_FILE_SIZE_BYTES) {
+				const uuid = randomUUID();
+				const ext = isAudioBool ? "mp3" : extension(mimeType) || "bin";
+				const safeName = fileName ? `${uuid}_${fileName}` : `${uuid}_file.${ext}`;
+				const savePath = join(filesPath, "/media", safeName);
+
+				await writeFile(savePath, formatedFile);
+
+				const fileUrl = `https://contec.inf.br/api/${this.clientName}/custom-routes/file/${encodeURIComponent(safeName)}`;
+				const captionWithLink = `${caption} ${fileUrl}`.trim();
+				sentMessage = await this.client.sendMessage(chatId, captionWithLink, {
+					quotedMessageId
+				});
+			} else {
+
+				const media = new WAWebJS.MessageMedia(
+					mimeType,
+					formatedFile.toString("base64"),
+					isAudioBool
+						? (fileName ?? "audio.mp3")
+						: (fileName ?? `file.${extension(mimeType) || "bin"}`)
+				);
+
+				sentMessage = await this.client.sendMessage(chatId, media, {
+					caption,
+					quotedMessageId,
+					sendAudioAsVoice: false,
+				});
+			}
+
 			log.setData((data) => ({ ...data, sentMessage }));
+
 			const parsedMessage = await parseMessage(sentMessage);
 			log.setData((data) => ({ ...data, parsedMessage }));
 
 			if (parsedMessage) {
+				parsedMessage.STATUS = "SENT";
 				logWithDate(
 					`[${this.clientName} - ${this.whatsappNumber}] Send file success => ${parsedMessage.ID}`
 				);
 			}
-
+			parsedMessage.MENSAGEM = parsedMessage.MENSAGEM
 			return parsedMessage;
+
 		} catch (err: any) {
 			log.setError(err);
 			log.save();
+
 			logWithDate(
 				`[${this.clientName} - ${this.whatsappNumber}] Send file failure  =>`,
 				err

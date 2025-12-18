@@ -1,13 +1,12 @@
 import WAWebJS from "whatsapp-web.js";
 import { join } from "node:path";
-import { access, readFile, mkdir, writeFile } from "node:fs/promises";
+import { access, readFile, mkdir, writeFile, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { Readable } from "node:stream";
-import { spawn } from "node:child_process";
 import { Router } from "express";
 import { config } from "dotenv";
 import { extension } from "mime-types";
 import { ParsedMessage } from "./types";
+import Ffmpeg from "fluent-ffmpeg";
 
 config();
 
@@ -180,55 +179,96 @@ function getAllEndpoints(router: Router, path: string) {
 	return endpoints;
 }
 
-async function formatToOpusAudio(file: Buffer): Promise<Buffer> {
-	try {
-		const tempPath = join(filesPath, "temp");
+async function formatToOpusAudio(inputBuffer: Buffer): Promise<Buffer> {
+  if (!inputBuffer?.length) throw new Error("Buffer de entrada vazio.");
 
-		try {
-			await access(tempPath);
-		} catch {
-			await mkdir(tempPath);
-		}
+  const TARGET_CONTAINER = "mp3";
+  const TARGET_CODEC = "libmp3lame";
+  const TARGET_BITRATE = "64k";  
+  const TARGET_RATE = 44100;     
+  const TARGET_CHANNELS = 1;
 
-		const savePath = join(tempPath, `${randomUUID()}.mp3`);
-		const readableStream = new Readable({
-			read() {
-				this.push(file);
-				this.push(null);
-			},
-		});
+  const baseDir = join(filesPath, "temp_mp3");
+  const inDir = join(baseDir, "in");
+  const outDir = join(baseDir, "out");
 
-		const ffmpeg = spawn("ffmpeg", [
-			"-i",
-			"pipe:0",
-			"-c:a",
-			"libmp3lame",
-			"-b:a",
-			"128k",
-			savePath,
-		]);
+  const ensureDir = async (p: string) => {
+    try { await access(p); } catch { await mkdir(p, { recursive: true }); }
+  };
+  const writeTempFile = async (buf: Buffer, ext: string) => {
+    await ensureDir(inDir);
+    const p = join(inDir, `${randomUUID()}.${ext}`);
+    await writeFile(p, new Uint8Array(buf)); 
+    return p;
+  };
+  const safeUnlink = async (p?: string) => {
+    if (!p) return;
+    try { await rm(p, { force: true }); } catch {}
+  };
+  const ffprobeSafe = (p: string) =>
+    new Promise<any>((resolve, reject) => {
+      Ffmpeg.ffprobe(p, (err, data) => (err ? reject(err) : resolve(data)));
+    });
 
-		readableStream.pipe(ffmpeg.stdin);
+  await ensureDir(inDir);
+  await ensureDir(outDir);
 
-		return new Promise((resolve, reject) => {
-			ffmpeg.on("close", async (code: number) => {
-				if (code === 0) {
-					const file = await readFile(savePath);
-					resolve(file);
-				} else {
-					reject(
-						`Erro ao converter para Opus, código de saída: ${code}`
-					);
-				}
-			});
+  const tmpInPath = await writeTempFile(inputBuffer, "bin");
+  const tmpOutPath = join(outDir, `${randomUUID()}.${TARGET_CONTAINER}`);
 
-			ffmpeg.on("error", (err: any) => {
-				reject(err);
-			});
-		});
-	} catch (err) {
-		throw err;
-	}
+  let probeInfo: any = null;
+
+  try {
+    try {
+      probeInfo = await ffprobeSafe(tmpInPath);
+    } catch {
+    }
+
+    const stderrLines: string[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      Ffmpeg(tmpInPath)
+        .noVideo()
+        .audioChannels(TARGET_CHANNELS)
+        .audioFrequency(TARGET_RATE)
+        .audioCodec(TARGET_CODEC)
+        .audioBitrate(TARGET_BITRATE)
+        .format(TARGET_CONTAINER)
+        .outputOptions([
+          "-vn" ,
+		  "-application",
+		  "voip" 
+        ])
+        .on("stderr", (line) => stderrLines.push(line))
+        .on("error", (err) => {
+          const streams =
+            probeInfo?.streams?.map(
+              (s: any) => `${s.codec_type}/${s.codec_name}/${s.sample_rate || ""}`
+            ) || [];
+          err.message =
+            `Falha na conversão (${err.message}).\n` +
+            `Input: ${tmpInPath}\nOutput: ${tmpOutPath}\n` +
+            `Probe streams: ${streams.join(", ") || "N/A"}\n` +
+            `ffmpeg stderr:\n${stderrLines.join("\n")}`;
+          reject(err);
+        })
+        .on("end", () => resolve())
+        .save(tmpOutPath);
+    });
+
+    const outputBuffer = await readFile(tmpOutPath);
+
+    if (process.env["KEEP_TEMP_AUDIO"] !== "true") {
+      await safeUnlink(tmpInPath);
+      await safeUnlink(tmpOutPath);
+      try { await rm(baseDir, { recursive: true }); } catch {}
+    }
+
+    return outputBuffer;
+  } catch (e) {
+    await safeUnlink(tmpInPath);
+    throw e;
+  }
 }
 
 function decodeSafeURI(uri: string) {
