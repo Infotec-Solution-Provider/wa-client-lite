@@ -17,6 +17,7 @@ async function sendResponse(automaticMessage: DBAutomaticMessage, instance: What
                 break;
             case "voice":
                 sendMedia(message, automaticMessage.attachment);
+                break;
             case "audio":
                 sendMedia(message, automaticMessage.attachment);
                 break;

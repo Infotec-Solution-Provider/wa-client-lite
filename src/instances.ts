@@ -1,5 +1,6 @@
 import { FieldPacket, RowDataPacket } from "mysql2";
 import WhatsappInstance from "./whatsapp";
+import WhatsappBaileysInstance from "./whatsapp-baileys";
 import { DBWhatsappInstance } from "./types";
 import "dotenv/config";
 import whatsappClientPool from "./connection";
@@ -22,8 +23,11 @@ WHERE c.is_active AND wi.is_active;
 
 const getURL = (client: string) => REQUEST_URL?.replace(":clientName", client) || "";
 
+// Union type for both instance types
+export type AnyWhatsappInstance = WhatsappInstance | WhatsappBaileysInstance;
+
 class WhatsappInstances {
-    public instances: Array<WhatsappInstance> = [];
+    public instances: Array<AnyWhatsappInstance> = [];
 
     constructor() {
         this.init();
@@ -31,20 +35,43 @@ class WhatsappInstances {
 
     private async init() {
         const [rows]: [Array<RowDataPacket>, Array<FieldPacket>] = await whatsappClientPool.query(SELECT_INSTANCES_QUERY);
-        const instances = rows as Array<DBWhatsappInstance>;
+        const dbInstances = rows as Array<DBWhatsappInstance>;
 
-        this.instances = instances.map(i => (
-            new WhatsappInstance(
-                i.client_name,
-                i.number,
-                getURL(i.client_name),
-                { host: i.db_host, port: i.db_port, user: i.db_user, password: i.db_pass, database: i.db_name }
-            )
-        ));
+        this.instances = dbInstances.map(i => {
+            const connectionParams = {
+                host: i.db_host,
+                port: i.db_port,
+                user: i.db_user,
+                password: i.db_pass,
+                database: i.db_name
+            };
+            const apiUrl = getURL(i.client_name);
+
+            switch (i.type) {
+                case "BAILEYS":
+                    return new WhatsappBaileysInstance(i.client_name, i.number, apiUrl, connectionParams);
+                case "WWEBJS":
+                    return new WhatsappInstance(i.client_name, i.number, apiUrl, connectionParams);
+                default:
+                    throw new Error(`Unsupported Whatsapp instance type: ${i.type}`);
+            }
+        });
     }
 
-    public find(number: string) {
-        return this.instances.find((i) => i.whatsappNumber == number);
+    public find(number: string): AnyWhatsappInstance | null {
+        return this.instances.find((i) => i.whatsappNumber == number) || null;
+    }
+
+    public findWebJS(number: string): WhatsappInstance | null {
+        return this.instances.find(
+            (i): i is WhatsappInstance => i.whatsappNumber == number && i instanceof WhatsappInstance
+        ) || null;
+    }
+
+    public findBaileys(number: string): WhatsappBaileysInstance | null {
+        return this.instances.find(
+            (i): i is WhatsappBaileysInstance => i.whatsappNumber == number && i instanceof WhatsappBaileysInstance
+        ) || null
     }
 
     public getPool(clientName: string) {
@@ -55,6 +82,14 @@ class WhatsappInstances {
         }
 
         return instance.pool;
+    }
+
+    public async closeAll() {
+        for (const instance of this.instances) {
+            if (instance instanceof WhatsappBaileysInstance) {
+                await instance.close();
+            }
+        }
     }
 }
 

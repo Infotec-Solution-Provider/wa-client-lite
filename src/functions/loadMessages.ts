@@ -1,10 +1,10 @@
 import { FieldPacket, ResultSetHeader } from "mysql2";
 import { Pool, RowDataPacket } from "mysql2/promise";
-import { logWithDate, parseMessage } from "../utils"
-import WhatsappInstance from "../whatsapp";
-import getNumberErpId from "./getNumberErpId";
 import WAWebJS from "whatsapp-web.js";
 import { ParsedMessage } from "../types";
+import { logWithDate, parseMessage } from "../utils";
+import WhatsappInstance from "../whatsapp";
+import getNumberErpId from "./getNumberErpId";
 
 async function loadMessages(instance: WhatsappInstance) {
     try {
@@ -35,7 +35,7 @@ async function loadMessages(instance: WhatsappInstance) {
 }
 
 async function processChat(pool: Pool, instance: WhatsappInstance, chats: WAWebJS.Chat[], index: number) {
-    const chat = chats[index];
+    const chat = chats[index]!;
     const contact = await instance.client.getContactById(chat.id._serialized);
     logWithDate(`[${index + 1}/${chats.length}] Loading Contact Messages: ${chat.id.user}...`);
 
@@ -109,7 +109,6 @@ async function saveMessage(pool: Pool, message: ParsedMessage & { CODIGO_NUMERO:
     try {
         if (message) {
             const { CODIGO_NUMERO, TIPO, MENSAGEM, FROM_ME, DATA_HORA, TIMESTAMP, ID, ID_REFERENCIA, STATUS } = message;
-
             const INSERT_MESSAGE_QUERY = "INSERT INTO w_mensagens (CODIGO_OPERADOR, CODIGO_NUMERO, TIPO, MENSAGEM, FROM_ME, DATA_HORA, TIMESTAMP, ID, ID_REFERENCIA, STATUS) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
             console.log(`Inserting Message:`, message.TIPO, message.ID);
@@ -130,6 +129,7 @@ async function saveMessage(pool: Pool, message: ParsedMessage & { CODIGO_NUMERO:
 
             return true;
         }
+        return false;
     } catch (err) {
         logWithDate(`Failed to save message id ${message?.ID} =>`, err);
 

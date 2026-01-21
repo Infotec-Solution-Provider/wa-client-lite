@@ -13,7 +13,7 @@ import { createWriteStream } from "node:fs";
 
 config();
 
-export const filesPath = process.env.FILES_DIRECTORY!;
+export const filesPath = process.env["FILES_DIRECTORY"]!;
 
 export function isMessageFromNow(message: WAWebJS.Message) {
 	const messageDate = new Date(Number(`${message.timestamp}000`));
@@ -26,7 +26,7 @@ export function isMessageFromNow(message: WAWebJS.Message) {
 
 export async function parseMessage(message: WAWebJS.Message) {
 	try {
-		if (process.env.USE_LOCAL_DATE) {
+		if (process.env["USE_LOCAL_DATE"]) {
 			message.timestamp = Date.now();
 		}
 
@@ -35,7 +35,7 @@ export async function parseMessage(message: WAWebJS.Message) {
 		const ID = message.id._serialized;
 		const TIPO = message.type;
 		const MENSAGEM = message.body;
-		const TIMESTAMP = process.env.USE_LOCAL_DATE
+		const TIMESTAMP = process.env["USE_LOCAL_DATE"]
 			? Date.now()
 			: Number(`${message.timestamp}000`);
 
@@ -62,7 +62,7 @@ export async function parseMessage(message: WAWebJS.Message) {
 			let mediaBuffer = Buffer.from(messageMedia.data, "base64");
 
 			if (isAudio) {
-				mediaBuffer = await formatToOpusAudio(mediaBuffer);
+				mediaBuffer = await formatToOpusAudio(mediaBuffer) as Buffer<ArrayBuffer>;
 			}
 
 			const uuid = randomUUID();
@@ -329,13 +329,13 @@ export function formatPhone(n: string) {
  * @property {function(): Promise<void>} waitForCompletion - Waits for all tasks in the queue to complete.
  */
 export function createTaskQueue(concurrencyLimit: number) {
-	const taskQueue = [];
-	const promises = [];
+	const taskQueue: Array<() => Promise<any>> = [];
+	const promises: Array<Promise<any>> = [];
 
 	const runTask = async (task: () => Promise<any>) => {
 		await task();
 		if (taskQueue.length > 0) {
-			const nextTask = taskQueue.shift();
+			const nextTask = taskQueue.shift()!;
 			await runTask(nextTask);
 		}
 	};

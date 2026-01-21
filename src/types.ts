@@ -8,6 +8,8 @@ export interface SendFileOptions {
     isAudio?: "true" | "false";
 }
 
+export type WhatsappInstanceType = "WWEBJS" | "BAILEYS";
+
 export interface DBWhatsappInstance {
     readonly number: string;
     readonly client_name: string;
@@ -20,6 +22,7 @@ export interface DBWhatsappInstance {
     readonly db_user: string;
     readonly db_pass: string;
     readonly db_name: string;
+    readonly type: WhatsappInstanceType;
 }
 
 export interface DBAutomaticMessage {

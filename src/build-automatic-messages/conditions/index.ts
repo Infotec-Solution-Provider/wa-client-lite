@@ -8,7 +8,7 @@ function checkCondition(condition: string): boolean {
         const values = condition.replace("OUT_TIME_RANGE", "").replace("(", "").replace(")", "").replace(" ", "");
         const [initialTime, finalTime] = values.split(",");
 
-        return isOutOfTimeRange(initialTime, finalTime);
+        return isOutOfTimeRange(initialTime!, finalTime!);
     } else if (condition.includes("DATE_EQUALS")) {
         const value = condition.replace("DATE_EQUALS", "").replace("(", "").replace(")", "").replace(" ", "");
 

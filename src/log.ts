@@ -21,8 +21,8 @@ class Log<T> {
 	private readonly startedAt: Date;
 	private readonly lines: Array<LogEvent>;
 	private finishedAt: Date | null;
-	private data: T;
-	private error: Error;
+	private data: T | undefined;
+	private error: Error | null = null;
 	/* private client: WAWebJS.Client; */
 	private errorFilePath: string | null = null;
 
@@ -35,7 +35,7 @@ class Log<T> {
 	) {
 		this.context = { clientName, type, identifier };
 		this.startedAt = new Date();
-		this.finishedAt = undefined;
+		this.finishedAt = null;
 		this.data = data;
 		this.lines = [];
 		/* this.client = client; */
@@ -47,7 +47,7 @@ class Log<T> {
 	 */
 	public setData(cb: (data: T) => T): void {
 		try {
-			this.data = cb(this.data);
+			this.data = cb(this.data!);
 		} catch (error) {
 			console.error("Error setting data:", error);
 		}
@@ -93,12 +93,12 @@ class Log<T> {
 				data: this.data,
 				lines: this.lines,
 				error: this.error,
-				errorMessage: this.error.message,
+				errorMessage: this.error?.message,
 			};
 
 			const fileName = `${Date.now()}.json`;
 			const logPath = path.join(
-				process.env.ERRORS_DIRECTORY,
+				process.env["ERRORS_DIRECTORY"] || "c://logs",
 				this.context.clientName,
 				this.context.type,
 				this.context.identifier
@@ -119,18 +119,18 @@ class Log<T> {
 
 	public async notify(): Promise<void> {
 		const isBusinessTime = !isOutOfTimeRange(
-			process.env.BUSINESS_TIME_START || "7:00",
-			process.env.BUSINESS_TIME_END || "18:00"
+			process.env["BUSINESS_TIME_START"] || "7:00",
+			process.env["BUSINESS_TIME_END"] || "18:00"
 		);
 
-		const notifyOutOfBusinessTime = process.env.NOTIFY_OUTSIDE_BUSINESS_TIME === "true";
+		const notifyOutOfBusinessTime = process.env["NOTIFY_OUTSIDE_BUSINESS_TIME"] === "true";
 
 		if (!notifyOutOfBusinessTime && !isBusinessTime) {
 			return
 		}
 
 		const notifyNumbers = (
-			process.env.NOTIFY_NUMBERS || "555131346499"
+			process.env["NOTIFY_NUMBERS"] || "555131346499"
 		).split(",");
 
 

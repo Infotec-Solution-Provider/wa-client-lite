@@ -13,7 +13,7 @@ async function loadAvatars(instance: WhatsappInstance) {
 
         for (let i = 0; i < runningAttendances.length; i++) {
             try {
-                const attendance = runningAttendances[i];
+                const attendance = runningAttendances[i]!;
                 logWithDate(`[${i + 1}/${runningAttendances.length}] Carregando avatar: ${attendance.CONTATO_NUMERO}`);
 
                 if (!attendance.CONTATO_NUMERO) {

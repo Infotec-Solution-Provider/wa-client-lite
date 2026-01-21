@@ -7,8 +7,8 @@ function isOutOfTimeRange(initialTime: string, finalTime: string) {
     const [finalHour, finalMinute] = finalTime.split(":").map(Number);
 
     const isOutsideTimeInterval = (
-        (currentHours < initialHour || (currentHours === initialHour && currentMinutes < initialMinute)) ||
-        (currentHours > finalHour || (currentHours === finalHour && currentMinutes > finalMinute))
+        (currentHours < initialHour! || (currentHours === initialHour && currentMinutes < initialMinute!)) ||
+        (currentHours > finalHour! || (currentHours === finalHour && currentMinutes > finalMinute!))
     );
 
     if (isOutsideTimeInterval) {

@@ -63,8 +63,8 @@ class WhatsappInstance {
       }),
       puppeteer: {
         headless: true,
-        executablePath: process.env.CHROME_BIN || undefined,
-        browserWSEndpoint: process.env.CHROME_WS || undefined,
+        ...(process.env["CHROME_BIN"] ? { executablePath: process.env["CHROME_BIN"] } : {}),
+        ...(process.env["CHROME_WS"] ? { browserWSEndpoint: process.env["CHROME_WS"] } : {}),
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
@@ -77,7 +77,7 @@ class WhatsappInstance {
       },
     });
 
-    schedule(process.env.CRON_LOAD_AVATARS || "0 */4 * * *", async () => {
+    schedule(process.env["CRON_LOAD_AVATARS"] || "0 */4 * * *", async () => {
       try {
         await this.loadAvatars();
         logWithDate(
@@ -91,7 +91,7 @@ class WhatsappInstance {
       }
     });
 
-    schedule(process.env.CRON_SYNC_MESSAGES || "*/2 * * * *", () =>
+    schedule(process.env["CRON_SYNC_MESSAGES"] || "*/2 * * * *", () =>
       this.syncMessagesWithServer()
     );
 
@@ -164,8 +164,7 @@ class WhatsappInstance {
           qr,
         });
         logWithDate(
-          `[${this.clientName} - ${
-            this.whatsappNumber
+          `[${this.clientName} - ${this.whatsappNumber
           }] QR success => ${qr.slice(0, 30)}...`
         );
       } catch (err: any) {
@@ -174,8 +173,8 @@ class WhatsappInstance {
           err?.response
             ? err.response.status
             : err.request
-            ? err.request._currentUrl
-            : err
+              ? err.request._currentUrl
+              : err
         );
       }
     });
@@ -205,8 +204,8 @@ class WhatsappInstance {
           err.response
             ? err.response.status
             : err.request
-            ? err.request._currentUrl
-            : err
+              ? err.request._currentUrl
+              : err
         );
       }
     });
@@ -224,8 +223,8 @@ class WhatsappInstance {
           err.response
             ? err.response.status
             : err.request
-            ? err.request._currentUrl
-            : err
+              ? err.request._currentUrl
+              : err
         );
       }
     });
@@ -244,7 +243,7 @@ class WhatsappInstance {
         [this.whatsappNumber]
       );
 
-    this.blockedNumbers = rows.map((r) => r.blocked_number);
+    this.blockedNumbers = rows.map((r) => r["blocked_number"] as string);
   }
 
   private async buildAutomaticMessages() {
@@ -269,8 +268,8 @@ class WhatsappInstance {
         err.response
           ? err.response.status
           : err.request
-          ? err.request._currentUrl
-          : err
+            ? err.request._currentUrl
+            : err
       );
     } finally {
       await this.client.initialize();
@@ -342,9 +341,9 @@ class WhatsappInstance {
               console.log(
                 err.response
                   ? {
-                      status: err.response.status,
-                      data: err.response.data,
-                    }
+                    status: err.response.status,
+                    data: err.response.data,
+                  }
                   : err.message
               );
             });
@@ -405,8 +404,8 @@ class WhatsappInstance {
           err.response
             ? err.response.status
             : err.request
-            ? err.request._currentUrl
-            : err
+              ? err.request._currentUrl
+              : err
         );
         await this.updateMessage(message.id._serialized, {
           SYNC_STATUS: false,
@@ -456,22 +455,11 @@ class WhatsappInstance {
     }
   }
 
-  public async loadGroups() {
-    try {
-      const chats = await this.client.getChats();
-      const groups = chats.filter((chat) => chat.isGroup);
-
-      return groups;
-    } catch (err) {
-      throw err;
-    }
-  }
-
   public async sendText(
     contact: string,
     text: string,
     quotedMessageId?: string
-  ) {
+  ): Promise<ParsedMessage | null | undefined> {
     const log = new Log<any>(
       this.client,
       this.clientName,
@@ -489,7 +477,7 @@ class WhatsappInstance {
 
       if (chatId) {
         const sentMessage = await this.client.sendMessage(chatId, text, {
-          quotedMessageId,
+          ...(quotedMessageId ? { quotedMessageId } : {}),
         });
         log.event("sent whatsapp message");
         log.setData((data) => ({ ...data, sentMessage }));
@@ -514,9 +502,10 @@ class WhatsappInstance {
         err
       );
     }
+    return undefined;
   }
 
-  public async sendFile(options: SendFileOptions) {
+  public async sendFile(options: SendFileOptions): Promise<ParsedMessage | null | undefined> {
     const log = new Log<any>(
       this.client,
       this.clientName,
@@ -545,8 +534,8 @@ class WhatsappInstance {
       const chatId = `${contact}@c.us`;
       const media = new WAWebJS.MessageMedia(mimeType, formatedFile, fileName);
       const sentMessage = await this.client.sendMessage(chatId, media, {
-        caption,
-        quotedMessageId,
+        ...(caption ? { caption } : {}),
+        ...(quotedMessageId ? { quotedMessageId } : {}),
         sendAudioAsVoice: !!isAudio,
       });
       log.setData((data) => ({ ...data, sentMessage }));
@@ -567,6 +556,7 @@ class WhatsappInstance {
         `[${this.clientName} - ${this.whatsappNumber}] Send file failure  =>`,
         err
       );
+      return undefined;
     }
   }
 
@@ -620,10 +610,12 @@ class WhatsappInstance {
         rows as Array<{ RAZAO: string; CNPJ: string; NOME: string }>
       )[0];
 
-      vars.cliente_razao = findContact.RAZAO;
-      vars.cliente_cnpj = findContact.CNPJ;
-      vars.contato_primeiro_nome = findContact.NOME.split(" ")[0];
-      vars.contato_nome_completo = findContact.NOME;
+      if (findContact) {
+        vars.cliente_razao = findContact.RAZAO;
+        vars.cliente_cnpj = findContact.CNPJ;
+        vars.contato_primeiro_nome = findContact.NOME.split(" ")[0] || "";
+        vars.contato_nome_completo = findContact.NOME;
+      }
 
       return vars;
     } catch (err) {
@@ -754,7 +746,7 @@ class WhatsappInstance {
 
             await axios
               .post(
-                `${this.requestURL}/receive_message/${this.whatsappNumber}/${message.FROM}`,
+                `${this.requestURL}/receive_message/${this.whatsappNumber}/${message["FROM"]}`,
                 parsedMessage
               )
               .then(() =>
@@ -769,7 +761,7 @@ class WhatsappInstance {
           if (SYNC_MESSAGE && !SYNC_STATUS) {
             log.setData(() => ({ status: STATUS }));
             await axios
-              .put(`${this.requestURL}/update_message/${message.FROM}`, {
+              .put(`${this.requestURL}/update_message/${message["FROM"]}`, {
                 status: STATUS,
               })
               .then(() => this.updateMessage(ID, { SYNC_STATUS: true }));
