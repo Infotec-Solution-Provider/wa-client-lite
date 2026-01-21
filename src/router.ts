@@ -9,6 +9,7 @@ import { loadContacts } from "./functions/loadContacts";
 import instances from "./instances";
 import { decodeSafeURI, filesPath, isUUID, logWithDate } from "./utils";
 import WhatsappInstance from "./whatsapp";
+import WhatsappBaileysInstance from "./whatsapp-baileys";
 
 config();
 
@@ -27,7 +28,7 @@ class AppRouter {
 		this.router.get("/clients/:from/validate-number/:to", this.validateNumber);
 		this.router.get("/files/:filename", this.getFile);
 		this.router.post("/files", upload.single("file"), this.uploadFile);
-		this.router.post("/clients/:from/sync/contacts",)
+		this.router.post("/clients/:from/messages/:to", upload.single("file"), this.sendMessage);
 	}
 
 
@@ -80,17 +81,29 @@ class AppRouter {
 				return res.status(404).send();
 			}
 
-			if (!(instance instanceof WhatsappInstance)) {
-				return res.status(400).send("Load contacts is only available for webjs instances");
+			// Suporte para Baileys
+			if (instance instanceof WhatsappBaileysInstance) {
+				const result = await instance.loadContacts();
+
+				if (result.alreadyRunning) {
+					return res.status(409).json({ message: "Load contacts is already running for this instance" });
+				}
+
+				return res.status(200).json({ message: "Load contacts started" });
 			}
 
-			const result = await loadContacts(instance);
+			// Suporte para WebJS
+			if (instance instanceof WhatsappInstance) {
+				const result = await loadContacts(instance);
 
-			if (result.alreadyRunning) {
-				return res.status(409).json({ message: "Load contacts is already running for this instance" });
+				if (result.alreadyRunning) {
+					return res.status(409).json({ message: "Load contacts is already running for this instance" });
+				}
+
+				return res.status(200).json({ message: "Load contacts started" });
 			}
 
-			return res.status(200).json({ message: "Load contacts started" });
+			return res.status(400).send("Unknown instance type");
 		} catch (err: any) {
 			return res.status(500).send(err);
 		}

@@ -69,6 +69,7 @@ class WhatsappBaileysInstance {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
   private removeCreds: (() => Promise<void>) | null = null;
+  private phoneContacts: Map<string, { id: string; name?: string; notify?: string }> = new Map();
 
   constructor(
     clientName: string,
@@ -337,6 +338,40 @@ class WhatsappBaileysInstance {
       for (const update of updates) {
         if (update.update.status) {
           await this.onReceiveMessageStatus(update.key, update.update.status);
+        }
+      }
+    });
+
+    // Handle contacts updates (Baileys recebe contatos do celular através deste evento)
+    this.client.ev.on("contacts.upsert", async (contacts) => {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Received ${contacts.length} contacts from phone`
+      );
+      for (const contact of contacts) {
+        if (contact.id && !contact.id.includes("@g.us")) {
+          const contactData: { id: string; name?: string; notify?: string } = {
+            id: contact.id,
+          };
+          if (contact.name) contactData.name = contact.name;
+          if (contact.notify) contactData.notify = contact.notify;
+          this.phoneContacts.set(contact.id, contactData);
+        }
+      }
+    });
+
+    // Handle contacts update (changes)
+    this.client.ev.on("contacts.update", async (updates) => {
+      for (const update of updates) {
+        if (update.id && !update.id.includes("@g.us")) {
+          const existing = this.phoneContacts.get(update.id);
+          const contactData: { id: string; name?: string; notify?: string } = {
+            id: update.id,
+          };
+          const finalName = update.name ?? existing?.name;
+          const finalNotify = update.notify ?? existing?.notify;
+          if (finalName) contactData.name = finalName;
+          if (finalNotify) contactData.notify = finalNotify;
+          this.phoneContacts.set(update.id, contactData);
         }
       }
     });
@@ -725,6 +760,135 @@ class WhatsappBaileysInstance {
         isGroup: true,
       }));
     } catch (err) {
+      throw err;
+    }
+  }
+
+  public async loadContacts(): Promise<{ total: number; saved: number; skipped: number; errors: number }> {
+    try {
+      if (!this.client) throw new Error("Client not connected");
+
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Starting contacts load... (${this.phoneContacts.size} contacts in memory)`
+      );
+
+      const contacts = Array.from(this.phoneContacts.values());
+      let saved = 0;
+      let skipped = 0;
+      let errors = 0;
+
+      for (const contact of contacts) {
+        try {
+          // Extrair número do JID (formato: 5511999999999@s.whatsapp.net)
+          const number = contact.id.replace(/@s\.whatsapp\.net/g, "");
+          
+          if (!number || number.length < 10) {
+            skipped++;
+            continue;
+          }
+
+          // Nome do contato (prioridade: name > notify > número)
+          const contactName = contact.name || contact.notify || null;
+
+          // Extrair DDD e corpo do número para buscar cliente
+          const numberWithoutCountry = number.length > 11 ? number.slice(2) : number;
+          const DDD = numberWithoutCountry.slice(0, 2);
+          const numberBody = numberWithoutCountry.length === 10 
+            ? numberWithoutCountry.slice(2) 
+            : numberWithoutCountry.slice(3);
+
+          const numberWithout9 = numberBody;
+          const numberWith9 = numberBody.length === 8 ? `9${numberBody}` : numberBody;
+
+          // Buscar cliente associado ao número
+          const SEARCH_CUSTOMER_QUERY = `
+            SELECT CODIGO FROM clientes
+            WHERE (AREA1 = ? AND FONE1 = ?) OR 
+                  (AREA2 = ? AND FONE2 = ?) OR 
+                  (AREA3 = ? AND FONE3 = ?) OR 
+                  (AREA1 = ? AND FONE1 = ?) OR 
+                  (AREA2 = ? AND FONE2 = ?) OR 
+                  (AREA3 = ? AND FONE3 = ?)
+            LIMIT 1
+          `;
+
+          const SEARCH_CONTACT_QUERY = `
+            SELECT CODIGO_CLIENTE as CODIGO, NOME FROM contatos
+            WHERE (AREA_CEL = ? AND CELULAR = ?) OR 
+                  (AREA_CEL = ? AND CELULAR = ?) OR
+                  (AREA_DIRETO = ? AND FONE_DIRETO = ?) OR 
+                  (AREA_DIRETO = ? AND FONE_DIRETO = ?) OR  
+                  (AREA_RESI = ? AND FONE_RESIDENCIAL = ?) OR 
+                  (AREA_RESI = ? AND FONE_RESIDENCIAL = ?)
+            LIMIT 1
+          `;
+
+          const searchParams = [
+            DDD, numberWith9,
+            DDD, numberWith9,
+            DDD, numberWith9,
+            DDD, numberWithout9,
+            DDD, numberWithout9,
+            DDD, numberWithout9,
+          ];
+
+          let customerCode: number = -1;
+          let dbContactName: string | null = null;
+
+          // Buscar na tabela clientes
+          const [customerRows] = await this.pool.query<RowDataPacket[]>(
+            SEARCH_CUSTOMER_QUERY,
+            searchParams
+          ).catch(() => [[] as RowDataPacket[]]);
+
+          if (customerRows[0]) {
+            customerCode = customerRows[0]["CODIGO"];
+          } else {
+            // Buscar na tabela contatos
+            const [contactRows] = await this.pool.query<RowDataPacket[]>(
+              SEARCH_CONTACT_QUERY,
+              searchParams
+            ).catch(() => [[] as RowDataPacket[]]);
+
+            if (contactRows[0]) {
+              customerCode = contactRows[0]["CODIGO"] || -1;
+              dbContactName = contactRows[0]["NOME"] || null;
+            }
+          }
+
+          // Nome final: prioridade contato do celular > contato do banco > número
+          const finalName = contactName || dbContactName || number;
+
+          // Inserir ou atualizar na tabela w_clientes_numeros
+          await this.pool.query(
+            `INSERT INTO w_clientes_numeros (CODIGO_CLIENTE, NOME, NUMERO) 
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE 
+               CODIGO_CLIENTE = IF(VALUES(CODIGO_CLIENTE) != -1, VALUES(CODIGO_CLIENTE), CODIGO_CLIENTE),
+               NOME = IF(VALUES(NOME) IS NOT NULL AND VALUES(NOME) != NUMERO, VALUES(NOME), NOME)`,
+            [customerCode, finalName, number]
+          );
+
+          saved++;
+        } catch (err) {
+          errors++;
+          logWithDate(
+            `[${this.clientName} - ${this.whatsappNumber}] Error saving contact ${contact.id}:`,
+            err
+          );
+        }
+      }
+
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Contacts load completed. Total: ${contacts.length}, Saved: ${saved}, Skipped: ${skipped}, Errors: ${errors}`
+      );
+
+      return { total: contacts.length, saved, skipped, errors };
+    } catch (err) {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Load contacts failure =>`,
+        err
+      );
       throw err;
     }
   }
