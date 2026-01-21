@@ -25,6 +25,8 @@ class AppRouter {
 		this.router.get("/clients/:from/load-messages", this.loadMessages);
 		this.router.get("/clients/:from/load-avatars", this.loadAvatars);
 		this.router.get("/clients/:from/load-contacts", this.loadContacts);
+		this.router.get("/clients/:from/contacts-stats", this.getContactsStats);
+		this.router.post("/clients/:from/sync-contacts-from-messages", this.syncContactsFromMessages);
 		this.router.get("/clients/:from/validate-number/:to", this.validateNumber);
 		this.router.get("/files/:filename", this.getFile);
 		this.router.post("/files", upload.single("file"), this.uploadFile);
@@ -89,7 +91,13 @@ class AppRouter {
 					return res.status(409).json({ message: "Load contacts is already running for this instance" });
 				}
 
-				return res.status(200).json({ message: "Load contacts started" });
+				return res.status(200).json({ 
+					message: "Load contacts completed", 
+					total: result.total,
+					saved: result.saved,
+					skipped: result.skipped,
+					errors: result.errors
+				});
 			}
 
 			// Suporte para WebJS
@@ -104,6 +112,55 @@ class AppRouter {
 			}
 
 			return res.status(400).send("Unknown instance type");
+		} catch (err: any) {
+			return res.status(500).send(err);
+		}
+	}
+
+	async getContactsStats(req: Request, res: Response) {
+		try {
+			const from = req.params["from"];
+			if (!from) {
+				return res.status(400).send("Parameter 'from' is required");
+			}
+			const instance = instances.find(from);
+			if (!instance) {
+				return res.status(404).send();
+			}
+
+			// Apenas para Baileys
+			if (instance instanceof WhatsappBaileysInstance) {
+				const result = await instance.getContactsStats();
+				return res.status(200).json(result);
+			}
+
+			return res.status(400).send("This endpoint is only available for Baileys instances");
+		} catch (err: any) {
+			return res.status(500).send(err);
+		}
+	}
+
+	async syncContactsFromMessages(req: Request, res: Response) {
+		try {
+			const from = req.params["from"];
+			if (!from) {
+				return res.status(400).send("Parameter 'from' is required");
+			}
+			const instance = instances.find(from);
+			if (!instance) {
+				return res.status(404).send();
+			}
+
+			// Apenas para Baileys
+			if (instance instanceof WhatsappBaileysInstance) {
+				const result = await instance.syncContactsFromMessages();
+				return res.status(200).json({
+					message: "Sync contacts from messages completed",
+					...result
+				});
+			}
+
+			return res.status(400).send("This endpoint is only available for Baileys instances");
 		} catch (err: any) {
 			return res.status(500).send(err);
 		}
