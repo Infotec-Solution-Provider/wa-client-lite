@@ -260,6 +260,10 @@ class WhatsappBaileysInstance {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
+        // Immediately mark as not ready to prevent sending messages
+        this.isReady = false;
+        this.isAuthenticated = false;
+
         logWithDate(
           `[${this.clientName} - ${this.whatsappNumber}] Connection closed due to ${lastDisconnect?.error}, reconnecting: ${shouldReconnect}`
         );
@@ -272,8 +276,6 @@ class WhatsappBaileysInstance {
           logWithDate(
             `[${this.clientName} - ${this.whatsappNumber}] Logged out. Clearing credentials and reconnecting...`
           );
-          this.isAuthenticated = false;
-          this.isReady = false;
 
           // Remove credentials from MySQL
           if (this.removeCreds) {
@@ -1551,6 +1553,9 @@ class WhatsappBaileysInstance {
 
     try {
       if (!this.client) throw new Error("Client not connected");
+      if (!this.isReady || !this.isAuthenticated) {
+        throw new Error("Connection not ready. Please wait for authentication.");
+      }
 
       log.event("started sendText function");
 
@@ -1620,6 +1625,9 @@ class WhatsappBaileysInstance {
 
     try {
       if (!this.client) throw new Error("Client not connected");
+      if (!this.isReady || !this.isAuthenticated) {
+        throw new Error("Connection not ready. Please wait for authentication.");
+      }
 
       const {
         contact,
