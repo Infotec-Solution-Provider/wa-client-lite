@@ -17,6 +17,7 @@ import makeWASocket, {
   MiscMessageGenerationOptions,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
+  Browsers,
 } from "@whiskeysockets/baileys";
 import { useMySQLAuthState } from "mysql-baileys";
 import { Boom } from "@hapi/boom";
@@ -206,16 +207,36 @@ class WhatsappBaileysInstance {
       return;
     }
 
+    logWithDate(
+      `[${this.clientName} - ${this.whatsappNumber}] Using Baileys version: ${version.join(".")}`
+    );
+
     // Use MySQL auth state
-    const { state, saveCreds, removeCreds } = await useMySQLAuthState({
-      session: `${this.clientName}_${this.whatsappNumber}`,
-      host: process.env["BAILEYS_AUTH_DB_HOST"] || "localhost",
-      port: Number(process.env["BAILEYS_AUTH_DB_PORT"]) || 3306,
-      user: process.env["BAILEYS_AUTH_DB_USER"] || "root",
-      password: process.env["BAILEYS_AUTH_DB_PASS"] || "",
-      database: process.env["BAILEYS_AUTH_DB_NAME"] || "baileys_auth",
-      tableName: process.env["BAILEYS_AUTH_TABLE_NAME"] || "auth",
-    });
+    let state: any;
+    let saveCreds: () => Promise<void>;
+    let removeCreds: () => Promise<void>;
+
+    try {
+      const authState = await useMySQLAuthState({
+        session: `${this.clientName}_${this.whatsappNumber}`,
+        host: process.env["BAILEYS_AUTH_DB_HOST"] || "localhost",
+        port: Number(process.env["BAILEYS_AUTH_DB_PORT"]) || 3306,
+        user: process.env["BAILEYS_AUTH_DB_USER"] || "root",
+        password: process.env["BAILEYS_AUTH_DB_PASS"] || "",
+        database: process.env["BAILEYS_AUTH_DB_NAME"] || "baileys_auth",
+        tableName: process.env["BAILEYS_AUTH_TABLE_NAME"] || "auth",
+      });
+      state = authState.state;
+      saveCreds = authState.saveCreds;
+      removeCreds = authState.removeCreds;
+    } catch (authError) {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Failed to initialize MySQL auth state:`,
+        authError
+      );
+      setTimeout(() => this.connectToWhatsApp(), 10000);
+      return;
+    }
 
     this.removeCreds = removeCreds;
 
@@ -226,7 +247,14 @@ class WhatsappBaileysInstance {
       },
       version,
       logger,
+      browser: Browsers.windows("Chrome"),
       syncFullHistory: true,
+      connectTimeoutMs: 60000,
+      qrTimeout: 40000,
+      defaultQueryTimeoutMs: 60000,
+      keepAliveIntervalMs: 25000,
+      markOnlineOnConnect: true,
+      generateHighQualityLinkPreview: true,
     });
 
     // Handle credentials update
@@ -258,21 +286,18 @@ class WhatsappBaileysInstance {
 
       if (connection === "close") {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
+        const errorMessage = (lastDisconnect?.error as Boom)?.message || "";
+        
         // Immediately mark as not ready to prevent sending messages
         this.isReady = false;
         this.isAuthenticated = false;
 
         logWithDate(
-          `[${this.clientName} - ${this.whatsappNumber}] Connection closed due to ${lastDisconnect?.error}, reconnecting: ${shouldReconnect}`
+          `[${this.clientName} - ${this.whatsappNumber}] Connection closed (code: ${statusCode}) due to ${lastDisconnect?.error}`
         );
 
-        if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
-          this.reconnectAttempts++;
-          const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 60000);
-          setTimeout(() => this.connectToWhatsApp(), delay);
-        } else if (statusCode === DisconnectReason.loggedOut) {
+        // Handle specific disconnect reasons
+        if (statusCode === DisconnectReason.loggedOut) {
           logWithDate(
             `[${this.clientName} - ${this.whatsappNumber}] Logged out. Clearing credentials and reconnecting...`
           );
@@ -284,6 +309,44 @@ class WhatsappBaileysInstance {
 
           // Reconnect after clearing credentials
           setTimeout(() => this.connectToWhatsApp(), 5000);
+        } else if (statusCode === DisconnectReason.restartRequired || 
+                   errorMessage.includes("QR refs") ||
+                   errorMessage.includes("Stream Errored")) {
+          // Restart required or QR expired - reconnect immediately without delay
+          logWithDate(
+            `[${this.clientName} - ${this.whatsappNumber}] Restart required or QR expired. Reconnecting immediately...`
+          );
+          this.reconnectAttempts = 0;
+          setTimeout(() => this.connectToWhatsApp(), 2000);
+        } else if (statusCode === DisconnectReason.connectionClosed ||
+                   statusCode === DisconnectReason.connectionLost ||
+                   statusCode === DisconnectReason.connectionReplaced ||
+                   statusCode === DisconnectReason.timedOut) {
+          // Connection issues - use exponential backoff
+          if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 60000);
+            logWithDate(
+              `[${this.clientName} - ${this.whatsappNumber}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
+            );
+            setTimeout(() => this.connectToWhatsApp(), delay);
+          } else {
+            logWithDate(
+              `[${this.clientName} - ${this.whatsappNumber}] Max reconnect attempts reached. Will retry in 5 minutes...`
+            );
+            this.reconnectAttempts = 0;
+            setTimeout(() => this.connectToWhatsApp(), 300000);
+          }
+        } else {
+          // Unknown error - try to reconnect anyway
+          if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            const delay = Math.min(2000 * Math.pow(2, this.reconnectAttempts), 60000);
+            logWithDate(
+              `[${this.clientName} - ${this.whatsappNumber}] Unknown disconnect reason. Reconnecting in ${delay}ms...`
+            );
+            setTimeout(() => this.connectToWhatsApp(), delay);
+          }
         }
       } else if (connection === "open") {
         this.reconnectAttempts = 0;
@@ -1722,6 +1785,9 @@ class WhatsappBaileysInstance {
   public async getProfilePicture(number: string): Promise<string | null> {
     try {
       if (!this.client) throw new Error("Client not connected");
+      if (!this.isReady || !this.isAuthenticated) {
+        throw new Error("Connection not ready. Please wait for authentication.");
+      }
 
       const jid = `${number}@s.whatsapp.net`;
       const pfpURL = await this.client.profilePictureUrl(jid, "image");

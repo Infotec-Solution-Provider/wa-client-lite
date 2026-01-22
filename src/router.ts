@@ -219,6 +219,19 @@ class AppRouter {
 			}
 		} catch (err) {
 			logWithDate("[router.js] Send message failure =>", err);
+			
+			// Check if it's a connection error
+			if (err instanceof Error) {
+				if (err.message.includes("Connection not ready") || 
+				    err.message.includes("Connection Closed") ||
+				    err.message.includes("Client not connected")) {
+					return res.status(503).json({ 
+						message: "WhatsApp connection is not ready. Please wait for reconnection.",
+						error: err.message 
+					});
+				}
+			}
+			
 			return res.status(500).json({ message: "Something went wrong" });
 		}
 	}
