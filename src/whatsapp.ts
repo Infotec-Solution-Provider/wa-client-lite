@@ -477,7 +477,7 @@ class WhatsappInstance {
 
       if (chatId) {
         const sentMessage = await this.client.sendMessage(chatId, text, {
-          ...(quotedMessageId ? { quotedMessageId } : {}),
+          ...(quotedMessageId ? { quotedMessageId, sendSeen: false } : { sendSeen: false }),
         });
         log.event("sent whatsapp message");
         log.setData((data) => ({ ...data, sentMessage }));
