@@ -303,9 +303,40 @@ class WhatsappInstance {
         const phone = message.from;
         const isGroup = phone.includes("@g.us");
 
-        const contactNumber = message.from
-          .replace(/@c\.us/g, "")
-          .replace(/@g\.us/g, "");
+        // Se a mensagem vem de um @lid (Local ID), tentar obter o número real
+        let contactNumber: string;
+        if (message.from.includes("@lid")) {
+          logWithDate(
+            `[${this.clientName} - ${this.whatsappNumber}] Processing message for ${message.from}...`
+          );
+          try {
+            const contact = await message.getContact();
+            const numberId = contact.id._serialized;
+            
+            // Verificar se conseguimos o número real
+            if (numberId && numberId.includes("@c.us")) {
+              contactNumber = numberId.replace(/@c\.us/g, "");
+              logWithDate(
+                `[${this.clientName} - ${this.whatsappNumber}] Resolved @lid to number: ${contactNumber}`
+              );
+            } else {
+              logWithDate(
+                `[${this.clientName} - ${this.whatsappNumber}] Could not resolve @lid to valid number, skipping message`
+              );
+              return;
+            }
+          } catch (err) {
+            logWithDate(
+              `[${this.clientName} - ${this.whatsappNumber}] Error resolving @lid:`,
+              err
+            );
+            return;
+          }
+        } else {
+          contactNumber = message.from
+            .replace(/@c\.us/g, "")
+            .replace(/@g\.us/g, "");
+        }
 
         const isPhone = validatePhoneStr(contactNumber);
 

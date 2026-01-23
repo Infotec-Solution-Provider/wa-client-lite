@@ -685,6 +685,12 @@ class WhatsappBaileysInstance {
           continue;
         }
 
+        // Ignorar mensagens com @lid (Local ID)
+        if (remoteJid.includes("@lid")) {
+          skipped++;
+          continue;
+        }
+
         // Ignorar mensagens sem conteúdo
         if (!waMessage.message) {
           skipped++;
@@ -1155,6 +1161,14 @@ class WhatsappBaileysInstance {
     const senderKeyDistributionMessage = waMessage.message.senderKeyDistributionMessage;
     
     if (protocolMessage || reactionMessage || senderKeyDistributionMessage) {
+      return;
+    }
+
+    // Se for um @lid (Local ID), ignorar pois não é um número real
+    if (remoteJid.includes("@lid")) {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Ignoring message from @lid (Local ID): ${remoteJid}`
+      );
       return;
     }
 
