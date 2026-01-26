@@ -312,7 +312,7 @@ class WhatsappInstance {
           try {
             const contact = await message.getContact();
             const numberId = contact.id._serialized;
-            
+
             // Verificar se conseguimos o número real
             if (numberId && numberId.includes("@c.us")) {
               contactNumber = numberId.replace(/@c\.us/g, "");
@@ -568,6 +568,7 @@ class WhatsappInstance {
         ...(caption ? { caption } : {}),
         ...(quotedMessageId ? { quotedMessageId } : {}),
         sendAudioAsVoice: !!isAudio,
+        sendSeen: false
       });
       log.setData((data) => ({ ...data, sentMessage }));
       const parsedMessage = await parseMessage(sentMessage);
