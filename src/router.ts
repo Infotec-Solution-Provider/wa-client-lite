@@ -10,6 +10,7 @@ import instances from "./instances";
 import { decodeSafeURI, filesPath, isUUID, logWithDate } from "./utils";
 import WhatsappInstance from "./whatsapp";
 import WhatsappBaileysInstance from "./whatsapp-baileys";
+import axios from "axios";
 
 config();
 
@@ -31,6 +32,11 @@ class AppRouter {
 		this.router.get("/files/:filename", this.getFile);
 		this.router.post("/files", upload.single("file"), this.uploadFile);
 		this.router.post("/clients/:from/messages/:to", upload.single("file"), this.sendMessage);
+		this.router.post(
+			"/clients/:from/mass-messages",
+			upload.single("file"),
+			this.sendMassMessages
+		);
 	}
 
 
@@ -52,7 +58,162 @@ class AppRouter {
 			return res.status(500).send(err);
 		}
 	}
+	async sendMassMessages(req: Request, res: Response) {
+		const { file, body, params } = req;
+		const { contacts, text, mode, filename } = body;
+		const { from } = params;
 
+		if (!from) {
+			res.status(400).send("Parameter 'from' is required");
+			return;
+		}
+
+		const instance = instances.find(from);
+
+		if (!instance) {
+			res.status(404).send();
+			return;
+		}
+
+		res.status(200).send();
+
+		const replaceVars = (
+			message: string,
+			vars: {
+				saudação_tempo: string;
+				cliente_razao: string;
+				cliente_cnpj: string;
+				contato_primeiro_nome: string;
+				contato_nome_completo: string;
+			}
+		) => {
+			message = message.replaceAll(
+				`@saudação_tempo`,
+				vars.saudação_tempo
+			);
+			message = message.replaceAll(`@cliente_razao`, vars.cliente_razao);
+			message = message.replaceAll(`@cliente_cnpj`, vars.cliente_cnpj);
+			message = message.replaceAll(
+				`@contato_primeiro_nome`,
+				vars.contato_primeiro_nome
+			);
+			message = message.replaceAll(
+				`@contato_nome_completo`,
+				vars.contato_nome_completo
+			);
+
+			return message;
+		};
+
+		const sendMMType1 = async (
+			contacts: string[],
+			file?: Express.Multer.File
+		) => {
+			try {
+				const contact = contacts[0]!;
+				const contactVars = await instance.getContactVars(contact);
+
+				const fileName = file && decodeURIComponent(file.originalname);
+
+				const parsedMessage = file
+					? await instance.sendFile({
+						caption: replaceVars(text, contactVars),
+						contact,
+						file: file.buffer,
+						fileName: fileName || file.originalname,
+						mimeType: file.mimetype,
+					})
+					: await instance.sendText(
+						contact,
+						replaceVars(text, contactVars)
+					);
+
+				await axios.post(
+					`${instance.requestURL.replace(
+						"/wwebjs",
+						""
+					)}/custom-routes/receive_mm/${instance.whatsappNumber
+					}/${contact}`,
+					parsedMessage
+				);
+				const randomInterval = 5000 + Math.random() * 5000;
+
+				contacts.shift();
+
+				if (contacts.length) {
+					setTimeout(() => {
+						sendMMType1(contacts, file);
+					}, randomInterval);
+				}
+			} catch (err) {
+				logWithDate(`Send MM Failure =>`, err);
+			}
+		};
+
+		const sendMMType2 = async (
+			contacts: string[],
+			file?: { name: string; buffer: Buffer; mimetype: string }
+		) => {
+			try {
+				const contact = contacts[0]!;
+				const contactVars = await instance.getContactVars(contact);
+
+				const parsedMessage = file
+					? await instance.sendFile({
+						caption: replaceVars(text, contactVars),
+						contact,
+						file: file.buffer,
+						fileName: file.name,
+						mimeType: file.mimetype,
+					})
+					: await instance.sendText(
+						contact,
+						replaceVars(text, contactVars)
+					);
+
+				await axios.post(
+					`${instance.requestURL.replace(
+						"/wwebjs",
+						""
+					)}/custom-routes/receive_mm/${instance.whatsappNumber
+					}/${contact}`,
+					parsedMessage
+				);
+				const randomInterval = 5000 + Math.random() * 5000;
+
+				contacts.shift();
+
+				if (contacts.length) {
+					setTimeout(() => {
+						sendMMType2(contacts, file);
+					}, randomInterval);
+				}
+			} catch (err) {
+				logWithDate(`Send MM Failure =>`, err);
+			}
+		};
+
+		if (mode == "0") {
+			sendMMType1(contacts.split(" "), file);
+		} else if (mode == "1") {
+			if (filename) {
+				const decodedFilename = decodeURIComponent(filename);
+				const filePath = join(filesPath, "/media", decodedFilename);
+				const fileBuffer = readFileSync(filePath);
+				const mimeType = mime.getType(filePath);
+
+				const file = {
+					name: decodedFilename.split("_").slice(1).join("_"),
+					buffer: fileBuffer,
+					mimetype: mimeType || "",
+				};
+
+				sendMMType2(contacts.split(" "), file);
+			} else {
+				sendMMType2(contacts.split(" "));
+			}
+		}
+	}
 	async loadAvatars(req: Request, res: Response) {
 		try {
 			const from = req.params["from"];
