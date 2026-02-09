@@ -19,7 +19,6 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
   Browsers,
-  jidNormalizedUser,
 } from "@whiskeysockets/baileys";
 import { useMySQLAuthState } from "mysql-baileys";
 import { Boom } from "@hapi/boom";
@@ -72,7 +71,7 @@ class WhatsappBaileysInstance {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
   private removeCreds: (() => Promise<void>) | null = null;
-  private phoneContacts: Map<string, { id: string; name?: string; notify?: string; lid?: string }> = new Map();
+  private phoneContacts: Map<string, { id: string; name?: string; notify?: string }> = new Map();
   private isLoadingContacts: boolean = false;
 
   constructor(
@@ -418,12 +417,11 @@ class WhatsappBaileysInstance {
       
       for (const contact of contacts) {
         if (contact.id && !contact.id.includes("@g.us")) {
-          const contactData: { id: string; name?: string; notify?: string; lid?: string } = {
+          const contactData: { id: string; name?: string; notify?: string } = {
             id: contact.id,
           };
           if (contact.name) contactData.name = contact.name;
           if (contact.notify) contactData.notify = contact.notify;
-          if ((contact as any).lid) contactData.lid = (contact as any).lid;
           this.phoneContacts.set(contact.id, contactData);
           
           // Salvar contato diretamente no banco de dados
@@ -445,15 +443,13 @@ class WhatsappBaileysInstance {
       for (const update of updates) {
         if (update.id && !update.id.includes("@g.us")) {
           const existing = this.phoneContacts.get(update.id);
-          const contactData: { id: string; name?: string; notify?: string; lid?: string } = {
+          const contactData: { id: string; name?: string; notify?: string } = {
             id: update.id,
           };
           const finalName = update.name ?? existing?.name;
           const finalNotify = update.notify ?? existing?.notify;
-          const finalLid = (update as any).lid ?? existing?.lid;
           if (finalName) contactData.name = finalName;
           if (finalNotify) contactData.notify = finalNotify;
-          if (finalLid) contactData.lid = finalLid;
           this.phoneContacts.set(update.id, contactData);
         }
       }
@@ -1140,30 +1136,20 @@ class WhatsappBaileysInstance {
   }
 
   public async onReceiveMessage(waMessage: proto.IWebMessageInfo) {
-    let remoteJid = waMessage?.key?.remoteJid;
     const remoteJidAlt = (waMessage as any)?.key?.remoteJidAlt as
       | string
       | undefined;
-    console.log("Received message from remoteJid:", remoteJid, waMessage);
-    if (remoteJid && remoteJid.includes("@lid")) {
-        logWithDate(`[${this.clientName}] Recebido LID: ${remoteJid}. Tentando converter...`);
-        
-        const realJid = this.getJidFromLid(remoteJid);
-
-        if (realJid) {
-            logWithDate(`[${this.clientName}] SUCESSO: Convertido de ${remoteJid} para ${realJid}`);
-            remoteJid = realJid; 
-        } else {
-            logWithDate(`[${this.clientName}] AVISO: Não encontrei o número vinculado ao LID ${remoteJid} na memória.`);
-        }
+    if (!remoteJidAlt) {
+      return;
     }
+    console.log("Received message from remoteJid:", remoteJidAlt, waMessage);
     // Ignorar mensagens de status e broadcast
-    if (!remoteJid || remoteJid === "status@broadcast" || remoteJid.endsWith("@broadcast")) {
+    if (remoteJidAlt === "status@broadcast" || remoteJidAlt.endsWith("@broadcast")) {
       return;
     }
 
     // Ignorar mensagens de grupo
-    if (remoteJid.includes("@g.us")) {
+    if (remoteJidAlt.includes("@g.us")) {
       return;
     }
 
@@ -1186,16 +1172,15 @@ class WhatsappBaileysInstance {
       return;
     }
 
-    // Se for um @lid (Local ID), ignorar pois não é um número real
-    if (remoteJid.includes("@lid")) {
+    // Se ainda for @lid (Local ID) sem remoteJidAlt, ignorar
+    if (remoteJidAlt.includes("@lid")) {
       logWithDate(
-        `[${this.clientName} - ${this.whatsappNumber}] Ignoring message from @lid (Local ID): ${remoteJid}`
+        `[${this.clientName} - ${this.whatsappNumber}] Ignoring message from @lid (Local ID): ${remoteJidAlt}`
       );
       return;
     }
 
-    const jidForNumber = remoteJidAlt || remoteJid;
-    const contactNumber = jidForNumber.replace(/@s\.whatsapp\.net/g, "");
+    const contactNumber = remoteJidAlt.replace(/@s\.whatsapp\.net/g, "");
 
     this.enqueueMessageProcessing(async () => {
       const log = new Log<any>(
@@ -2116,22 +2101,6 @@ class WhatsappBaileysInstance {
   // Method to logout and clear credentials
   public async logout() {
     await this.close(true);
-  }
-  /**
- * Busca o JID real (Número) através do LID
- */
-  private getJidFromLid(lid: string): string | null {
-    console.log("Attempting to get JID from LID:", lid);
-    const normalizedLid = jidNormalizedUser(lid);
-    console.log("Searching for JID with LID:", normalizedLid);
-    // Varre seus contatos em memória procurando quem tem esse LID
-    for (const contact of this.phoneContacts.values()) {
-      // Nota: Para isso funcionar, seu 'contacts.upsert' precisa estar salvando o campo 'lid'
-      if ((contact as any).lid && jidNormalizedUser((contact as any).lid) === normalizedLid) {
-        return contact.id; // Retorna o ID real (ex: 5583...@s.whatsapp.net)
-      }
-    }
-    return null;
   }
 }
 
