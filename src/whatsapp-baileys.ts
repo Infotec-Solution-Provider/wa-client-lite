@@ -1135,6 +1135,7 @@ class WhatsappBaileysInstance {
 
   public async onReceiveMessage(waMessage: proto.IWebMessageInfo) {
     let remoteJid = waMessage.key.remoteJid;
+    console.log("Received message from remoteJid:", waMessage);
     if (remoteJid && remoteJid.includes("@lid")) {
         logWithDate(`[${this.clientName}] Recebido LID: ${remoteJid}. Tentando converter...`);
         
