@@ -13,6 +13,7 @@ import makeWASocket, {
   downloadMediaMessage,
   getContentType,
   WAMessageKey,
+  WAMessage,
   AnyMessageContent,
   MiscMessageGenerationOptions,
   makeCacheableSignalKeyStore,
@@ -71,7 +72,7 @@ class WhatsappBaileysInstance {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
   private removeCreds: (() => Promise<void>) | null = null;
-  private phoneContacts: Map<string, { id: string; name?: string; notify?: string }> = new Map();
+  private phoneContacts: Map<string, { id: string; name?: string; notify?: string; lid?: string }> = new Map();
   private isLoadingContacts: boolean = false;
 
   constructor(
@@ -417,11 +418,12 @@ class WhatsappBaileysInstance {
       
       for (const contact of contacts) {
         if (contact.id && !contact.id.includes("@g.us")) {
-          const contactData: { id: string; name?: string; notify?: string } = {
+          const contactData: { id: string; name?: string; notify?: string; lid?: string } = {
             id: contact.id,
           };
           if (contact.name) contactData.name = contact.name;
           if (contact.notify) contactData.notify = contact.notify;
+          if ((contact as any).lid) contactData.lid = (contact as any).lid;
           this.phoneContacts.set(contact.id, contactData);
           
           // Salvar contato diretamente no banco de dados
@@ -443,13 +445,15 @@ class WhatsappBaileysInstance {
       for (const update of updates) {
         if (update.id && !update.id.includes("@g.us")) {
           const existing = this.phoneContacts.get(update.id);
-          const contactData: { id: string; name?: string; notify?: string } = {
+          const contactData: { id: string; name?: string; notify?: string; lid?: string } = {
             id: update.id,
           };
           const finalName = update.name ?? existing?.name;
           const finalNotify = update.notify ?? existing?.notify;
+          const finalLid = (update as any).lid ?? existing?.lid;
           if (finalName) contactData.name = finalName;
           if (finalNotify) contactData.notify = finalNotify;
+          if (finalLid) contactData.lid = finalLid;
           this.phoneContacts.set(update.id, contactData);
         }
       }
@@ -673,7 +677,7 @@ class WhatsappBaileysInstance {
 
     for (const waMessage of messages) {
       try {
-        const remoteJid = waMessage.key.remoteJid;
+        const remoteJid = waMessage.key?.remoteJid;
 
         // Ignorar mensagens de status, broadcast e grupos
         if (!remoteJid || remoteJid === "status@broadcast" || remoteJid.endsWith("@broadcast")) {
@@ -737,7 +741,7 @@ class WhatsappBaileysInstance {
       } catch (err) {
         errors++;
         logWithDate(
-          `[${this.clientName} - ${this.whatsappNumber}] Error processing history message ${waMessage.key.id}:`,
+          `[${this.clientName} - ${this.whatsappNumber}] Error processing history message ${waMessage.key?.id}:`,
           err
         );
       }
@@ -759,12 +763,12 @@ class WhatsappBaileysInstance {
       if (!message) return null;
 
       const timestamp = (waMessage.messageTimestamp as number) * 1000;
-      const ID = waMessage.key.id!;
+      const ID = waMessage.key?.id!;
       const ID_REFERENCIA = this.getQuotedMessageId(message);
       const TIPO = this.getMessageType(message);
       const MENSAGEM = this.getMessageBody(message);
       const TIMESTAMP = timestamp;
-      const FROM_ME = waMessage.key.fromMe || false;
+      const FROM_ME = waMessage.key?.fromMe || false;
 
       const statusMap = ["PENDING", "SENT", "RECEIVED", "READ", "PLAYED"];
       const STATUS = statusMap[waMessage.status || 0] || "PENDING";
@@ -1013,16 +1017,18 @@ class WhatsappBaileysInstance {
     waMessage: proto.IWebMessageInfo
   ): Promise<ParsedMessage | null> {
     try {
+      if (!waMessage.key) return null;
+      const safeMessage = waMessage as WAMessage;
       const message = waMessage.message;
       if (!message) return null;
 
       const timestamp = (waMessage.messageTimestamp as number) * 1000;
-      const ID = waMessage.key.id!;
+      const ID = waMessage.key?.id!;
       const ID_REFERENCIA = this.getQuotedMessageId(message);
       const TIPO = this.getMessageType(message);
       const MENSAGEM = this.getMessageBody(message);
       const TIMESTAMP = process.env["USE_LOCAL_DATE"] ? Date.now() : timestamp;
-      const FROM_ME = waMessage.key.fromMe || false;
+      const FROM_ME = waMessage.key?.fromMe || false;
 
       const statusMap = ["PENDING", "SENT", "RECEIVED", "READ", "PLAYED"];
       const STATUS = statusMap[waMessage.status || 0] || "PENDING";
@@ -1054,7 +1060,7 @@ class WhatsappBaileysInstance {
           while (!mediaBuffer && retryCount < maxRetries) {
             try {
               mediaBuffer = await downloadMediaMessage(
-                waMessage,
+                safeMessage,
                 "buffer",
                 {},
                 {
@@ -1134,8 +1140,9 @@ class WhatsappBaileysInstance {
   }
 
   public async onReceiveMessage(waMessage: proto.IWebMessageInfo) {
-    let remoteJid = waMessage.key.remoteJid;
-    console.log("Received message from remoteJid:", waMessage);
+    let remoteJid = waMessage?.key?.remoteJid;
+    let remoteJidAlt: string | undefined;
+    console.log("Received message from remoteJid:", remoteJid, waMessage);
     if (remoteJid && remoteJid.includes("@lid")) {
         logWithDate(`[${this.clientName}] Recebido LID: ${remoteJid}. Tentando converter...`);
         
@@ -1159,7 +1166,7 @@ class WhatsappBaileysInstance {
     }
 
     // Ignorar mensagens próprias (enviadas pelo bot)
-    if (waMessage.key.fromMe) {
+    if (waMessage?.key?.fromMe) {
       return;
     }
 
@@ -1186,14 +1193,15 @@ class WhatsappBaileysInstance {
     }
 
     const contactNumber = remoteJid.replace(/@s\.whatsapp\.net/g, "");
+    remoteJidAlt = contactNumber;
 
     this.enqueueMessageProcessing(async () => {
       const log = new Log<any>(
         this.client as any,
         this.clientName,
         "receive-message",
-        `${waMessage.key.id}`,
-        { message: waMessage }
+        `${waMessage.key?.id}`,
+        { message: waMessage, remoteJidAlt }
       );
 
       try {
@@ -1270,7 +1278,7 @@ class WhatsappBaileysInstance {
           }
 
           logWithDate(
-            `[${this.clientName} - ${this.whatsappNumber}] Message success => ${waMessage.key.id}`
+            `[${this.clientName} - ${this.whatsappNumber}] Message success => ${waMessage.key?.id}`
           );
         }
       } catch (err: any) {
@@ -1669,9 +1677,10 @@ class WhatsappBaileysInstance {
           key: {
             remoteJid: jid,
             id: quotedMessageId,
+            fromMe: false,
           },
           message: {},
-        } as proto.IWebMessageInfo;
+        } as WAMessage;
       }
 
       const sentMessage = await this.client.sendMessage(jid, { text }, options);
@@ -1741,15 +1750,16 @@ class WhatsappBaileysInstance {
       }
 
       const msgOptions: MiscMessageGenerationOptions = {};
-
+      if(msgOptions && msgOptions.quoted == null && msgOptions.quoted == undefined) return ;
       if (quotedMessageId) {
         msgOptions.quoted = {
           key: {
             remoteJid: jid,
             id: quotedMessageId,
+            fromMe: false,
           },
           message: {},
-        } as proto.IWebMessageInfo;
+        } as WAMessage;
       }
 
       let content: AnyMessageContent;
