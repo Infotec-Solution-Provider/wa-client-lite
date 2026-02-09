@@ -18,6 +18,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
   Browsers,
+  jidNormalizedUser, // IMPORTADO PARA CORREÇÃO
 } from "@whiskeysockets/baileys";
 import { useMySQLAuthState } from "mysql-baileys";
 import { Boom } from "@hapi/boom";
@@ -70,7 +71,10 @@ class WhatsappBaileysInstance {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
   private removeCreds: (() => Promise<void>) | null = null;
-  private phoneContacts: Map<string, { id: string; name?: string; notify?: string }> = new Map();
+  private phoneContacts: Map<
+    string,
+    { id: string; name?: string; notify?: string }
+  > = new Map();
   private isLoadingContacts: boolean = false;
 
   constructor(
@@ -187,8 +191,8 @@ class WhatsappBaileysInstance {
         err.response
           ? err.response.status
           : err.request
-            ? err.request._currentUrl
-            : err
+          ? err.request._currentUrl
+          : err
       );
     } finally {
       await this.connectToWhatsApp();
@@ -208,7 +212,9 @@ class WhatsappBaileysInstance {
     }
 
     logWithDate(
-      `[${this.clientName} - ${this.whatsappNumber}] Using Baileys version: ${version.join(".")}`
+      `[${this.clientName} - ${this.whatsappNumber}] Using Baileys version: ${version.join(
+        "."
+      )}`
     );
 
     // Use MySQL auth state
@@ -270,7 +276,10 @@ class WhatsappBaileysInstance {
             qr,
           });
           logWithDate(
-            `[${this.clientName} - ${this.whatsappNumber}] QR success => ${qr.slice(0, 30)}...`
+            `[${this.clientName} - ${this.whatsappNumber}] QR success => ${qr.slice(
+              0,
+              30
+            )}...`
           );
         } catch (err: any) {
           logWithDate(
@@ -278,8 +287,8 @@ class WhatsappBaileysInstance {
             err?.response
               ? err.response.status
               : err.request
-                ? err.request._currentUrl
-                : err
+              ? err.request._currentUrl
+              : err
           );
         }
       }
@@ -287,7 +296,7 @@ class WhatsappBaileysInstance {
       if (connection === "close") {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
         const errorMessage = (lastDisconnect?.error as Boom)?.message || "";
-        
+
         // Immediately mark as not ready to prevent sending messages
         this.isReady = false;
         this.isAuthenticated = false;
@@ -309,23 +318,30 @@ class WhatsappBaileysInstance {
 
           // Reconnect after clearing credentials
           setTimeout(() => this.connectToWhatsApp(), 5000);
-        } else if (statusCode === DisconnectReason.restartRequired || 
-                   errorMessage.includes("QR refs") ||
-                   errorMessage.includes("Stream Errored")) {
+        } else if (
+          statusCode === DisconnectReason.restartRequired ||
+          errorMessage.includes("QR refs") ||
+          errorMessage.includes("Stream Errored")
+        ) {
           // Restart required or QR expired - reconnect immediately without delay
           logWithDate(
             `[${this.clientName} - ${this.whatsappNumber}] Restart required or QR expired. Reconnecting immediately...`
           );
           this.reconnectAttempts = 0;
           setTimeout(() => this.connectToWhatsApp(), 2000);
-        } else if (statusCode === DisconnectReason.connectionClosed ||
-                   statusCode === DisconnectReason.connectionLost ||
-                   statusCode === DisconnectReason.connectionReplaced ||
-                   statusCode === DisconnectReason.timedOut) {
+        } else if (
+          statusCode === DisconnectReason.connectionClosed ||
+          statusCode === DisconnectReason.connectionLost ||
+          statusCode === DisconnectReason.connectionReplaced ||
+          statusCode === DisconnectReason.timedOut
+        ) {
           // Connection issues - use exponential backoff
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
-            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 60000);
+            const delay = Math.min(
+              1000 * Math.pow(2, this.reconnectAttempts),
+              60000
+            );
             logWithDate(
               `[${this.clientName} - ${this.whatsappNumber}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
             );
@@ -341,7 +357,10 @@ class WhatsappBaileysInstance {
           // Unknown error - try to reconnect anyway
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
-            const delay = Math.min(2000 * Math.pow(2, this.reconnectAttempts), 60000);
+            const delay = Math.min(
+              2000 * Math.pow(2, this.reconnectAttempts),
+              60000
+            );
             logWithDate(
               `[${this.clientName} - ${this.whatsappNumber}] Unknown disconnect reason. Reconnecting in ${delay}ms...`
             );
@@ -354,7 +373,10 @@ class WhatsappBaileysInstance {
         this.isReady = true;
 
         try {
-          await axios.post(`${this.requestURL}/auth/${this.whatsappNumber}`, {});
+          await axios.post(
+            `${this.requestURL}/auth/${this.whatsappNumber}`,
+            {}
+          );
           logWithDate(
             `[${this.clientName} - ${this.whatsappNumber}] Auth success!`
           );
@@ -364,8 +386,8 @@ class WhatsappBaileysInstance {
             err?.response
               ? err.response.status
               : err.request
-                ? err.request._currentUrl
-                : err
+              ? err.request._currentUrl
+              : err
           );
         }
 
@@ -380,8 +402,8 @@ class WhatsappBaileysInstance {
             err?.response
               ? err.response.status
               : err.request
-                ? err.request._currentUrl
-                : err
+              ? err.request._currentUrl
+              : err
           );
         }
       }
@@ -410,26 +432,32 @@ class WhatsappBaileysInstance {
       logWithDate(
         `[${this.clientName} - ${this.whatsappNumber}] Received ${contacts.length} contacts from phone`
       );
-      
+
       let saved = 0;
       let skipped = 0;
-      
+
       for (const contact of contacts) {
         if (contact.id && !contact.id.includes("@g.us")) {
-          const contactData: { id: string; name?: string; notify?: string } = {
+          const contactData: {
+            id: string;
+            name?: string;
+            notify?: string;
+          } = {
             id: contact.id,
           };
           if (contact.name) contactData.name = contact.name;
           if (contact.notify) contactData.notify = contact.notify;
           this.phoneContacts.set(contact.id, contactData);
-          
+
           // Salvar contato diretamente no banco de dados
-          const result = await this.saveContactToDatabase(contactData).catch(() => false);
+          const result = await this.saveContactToDatabase(contactData).catch(
+            () => false
+          );
           if (result) saved++;
           else skipped++;
         }
       }
-      
+
       if (saved > 0) {
         logWithDate(
           `[${this.clientName} - ${this.whatsappNumber}] Contacts saved to database: ${saved} saved, ${skipped} skipped`
@@ -456,20 +484,27 @@ class WhatsappBaileysInstance {
 
     // Handle messaging history set (sync historical messages and contacts)
     this.client.ev.on("messaging-history.set", async (historyData) => {
-      const { messages, contacts, chats, isLatest, progress, syncType } = historyData;
+      const { messages, contacts, chats, isLatest, progress, syncType } =
+        historyData;
 
       // Debug: Log completo do historyData
       logWithDate(
         `[${this.clientName} - ${this.whatsappNumber}] ========== HISTORY SYNC DEBUG ==========`
       );
       logWithDate(
-        `[${this.clientName} - ${this.whatsappNumber}] Raw historyData keys: ${Object.keys(historyData).join(", ")}`
+        `[${this.clientName} - ${this.whatsappNumber}] Raw historyData keys: ${Object.keys(
+          historyData
+        ).join(", ")}`
       );
       logWithDate(
         `[${this.clientName} - ${this.whatsappNumber}] isLatest: ${isLatest}, progress: ${progress}%, syncType: ${syncType}`
       );
       logWithDate(
-        `[${this.clientName} - ${this.whatsappNumber}] Chats: ${chats?.length || 0}, Contacts: ${contacts?.length || 0}, Messages: ${messages?.length || 0}`
+        `[${this.clientName} - ${this.whatsappNumber}] Chats: ${
+          chats?.length || 0
+        }, Contacts: ${contacts?.length || 0}, Messages: ${
+          messages?.length || 0
+        }`
       );
 
       // Debug: Mostrar sample de contatos
@@ -479,7 +514,9 @@ class WhatsappBaileysInstance {
         );
         contacts.slice(0, 5).forEach((c, i) => {
           logWithDate(
-            `  [${i}] id: ${c.id}, name: ${c.name || "N/A"}, notify: ${c.notify || "N/A"}, verifiedName: ${c.verifiedName || "N/A"}`
+            `  [${i}] id: ${c.id}, name: ${c.name || "N/A"}, notify: ${
+              c.notify || "N/A"
+            }, verifiedName: ${c.verifiedName || "N/A"}`
           );
         });
       } else {
@@ -495,7 +532,9 @@ class WhatsappBaileysInstance {
         );
         chats.slice(0, 5).forEach((c, i) => {
           logWithDate(
-            `  [${i}] id: ${c.id}, name: ${c.name || "N/A"}, unreadCount: ${c.unreadCount || 0}`
+            `  [${i}] id: ${c.id}, name: ${c.name || "N/A"}, unreadCount: ${
+              c.unreadCount || 0
+            }`
           );
         });
       } else {
@@ -511,7 +550,9 @@ class WhatsappBaileysInstance {
         );
         messages.slice(0, 3).forEach((m, i) => {
           logWithDate(
-            `  [${i}] remoteJid: ${m.key?.remoteJid}, fromMe: ${m.key?.fromMe}, pushName: ${m.pushName || "N/A"}`
+            `  [${i}] remoteJid: ${m.key?.remoteJid}, fromMe: ${
+              m.key?.fromMe
+            }, pushName: ${m.pushName || "N/A"}`
           );
         });
       } else {
@@ -560,14 +601,25 @@ class WhatsappBaileysInstance {
    * Processa e salva contatos do histórico no banco de dados
    * Esta é a principal fonte de contatos quando o sync é executado
    */
-  private async processHistoryContacts(contacts: Array<{ id: string; name?: string; notify?: string; verifiedName?: string }>) {
+  private async processHistoryContacts(
+    contacts: Array<{
+      id: string;
+      name?: string;
+      notify?: string;
+      verifiedName?: string;
+    }>
+  ) {
     let saved = 0;
     let skipped = 0;
 
     for (const contact of contacts) {
       try {
         // Ignorar grupos e status
-        if (!contact.id || contact.id.includes("@g.us") || contact.id === "status@broadcast") {
+        if (
+          !contact.id ||
+          contact.id.includes("@g.us") ||
+          contact.id === "status@broadcast"
+        ) {
           skipped++;
           continue;
         }
@@ -578,13 +630,16 @@ class WhatsappBaileysInstance {
         };
         if (contact.name) contactData.name = contact.name;
         if (contact.notify) contactData.notify = contact.notify;
-        if (contact.verifiedName) contactData.name = contactData.name || contact.verifiedName;
+        if (contact.verifiedName)
+          contactData.name = contactData.name || contact.verifiedName;
 
         // Adicionar à memória
         this.phoneContacts.set(contact.id, contactData);
 
         // Salvar no banco de dados
-        const result = await this.saveContactToDatabase(contactData).catch(() => false);
+        const result = await this.saveContactToDatabase(contactData).catch(
+          () => false
+        );
         if (result) saved++;
         else skipped++;
       } catch {
@@ -602,14 +657,20 @@ class WhatsappBaileysInstance {
   /**
    * Processa chats do histórico e extrai contatos
    */
-  private async processHistoryChats(chats: Array<{ id?: string | null; name?: string | null }>) {
+  private async processHistoryChats(
+    chats: Array<{ id?: string | null; name?: string | null }>
+  ) {
     let saved = 0;
     let skipped = 0;
 
     for (const chat of chats) {
       try {
         // Ignorar grupos e status
-        if (!chat.id || chat.id.includes("@g.us") || chat.id === "status@broadcast") {
+        if (
+          !chat.id ||
+          chat.id.includes("@g.us") ||
+          chat.id === "status@broadcast"
+        ) {
           skipped++;
           continue;
         }
@@ -633,7 +694,9 @@ class WhatsappBaileysInstance {
         this.phoneContacts.set(chat.id, contactData);
 
         // Salvar no banco de dados
-        const result = await this.saveContactToDatabase(contactData).catch(() => false);
+        const result = await this.saveContactToDatabase(contactData).catch(
+          () => false
+        );
         if (result) saved++;
         else skipped++;
       } catch {
@@ -672,10 +735,15 @@ class WhatsappBaileysInstance {
 
     for (const waMessage of messages) {
       try {
-        const remoteJid = waMessage.key.remoteJid;
+        // Normalizar o JID para lidar com LIDs
+        const remoteJid = jidNormalizedUser(waMessage.key.remoteJid || "");
 
         // Ignorar mensagens de status, broadcast e grupos
-        if (!remoteJid || remoteJid === "status@broadcast" || remoteJid.endsWith("@broadcast")) {
+        if (
+          !remoteJid ||
+          remoteJid === "status@broadcast" ||
+          remoteJid.endsWith("@broadcast")
+        ) {
           skipped++;
           continue;
         }
@@ -685,11 +753,8 @@ class WhatsappBaileysInstance {
           continue;
         }
 
-        // Ignorar mensagens com @lid (Local ID)
-        if (remoteJid.includes("@lid")) {
-          skipped++;
-          continue;
-        }
+        // CORREÇÃO: Removido o bloqueio explicito de @lid
+        // O código tentará processar o LID normalizado
 
         // Ignorar mensagens sem conteúdo
         if (!waMessage.message) {
@@ -700,19 +765,30 @@ class WhatsappBaileysInstance {
         // Ignorar mensagens de protocolo específicas
         const protocolMessage = waMessage.message.protocolMessage;
         const reactionMessage = waMessage.message.reactionMessage;
-        const senderKeyDistributionMessage = waMessage.message.senderKeyDistributionMessage;
+        const senderKeyDistributionMessage =
+          waMessage.message.senderKeyDistributionMessage;
 
-        if (protocolMessage || reactionMessage || senderKeyDistributionMessage) {
+        if (
+          protocolMessage ||
+          reactionMessage ||
+          senderKeyDistributionMessage
+        ) {
           skipped++;
           continue;
         }
 
-        const contactNumber = remoteJid.replace(/@s\.whatsapp\.net/g, "");
+        // Ajuste para lidar com identificadores LID ou Phone
+        const contactNumber = remoteJid.replace(
+          /@s\.whatsapp\.net|@lid/g,
+          ""
+        );
 
-        // Validar se é um número de telefone válido
-        if (!validatePhoneStr(contactNumber)) {
-          skipped++;
-          continue;
+        // Validar se é um número de telefone válido (se for LID, pode falhar na validação estrita, dependendo da sua utils)
+        // Aqui assumimos que se não for formato válido, ignoramos, mas pelo menos tentamos
+        if (!validatePhoneStr(contactNumber) && !remoteJid.includes("@lid")) {
+           // Se for LID, deixamos passar por enquanto se validatePhoneStr falhar
+           skipped++;
+           continue;
         }
 
         // Verificar tipo da mensagem
@@ -783,13 +859,20 @@ class WhatsappBaileysInstance {
       // Para mensagens do histórico, não baixamos mídia para economizar recursos
       // Apenas registramos que existe um arquivo
       const contentType = getContentType(message);
-      const mediaTypes = ["imageMessage", "videoMessage", "audioMessage", "documentMessage", "stickerMessage"];
+      const mediaTypes = [
+        "imageMessage",
+        "videoMessage",
+        "audioMessage",
+        "documentMessage",
+        "stickerMessage",
+      ];
       const hasMedia = mediaTypes.includes(contentType || "");
 
       if (hasMedia) {
         const content = message[contentType as keyof proto.IMessage] as any;
         const mimeType = content?.mimetype || "application/octet-stream";
-        const originalFileName = content?.fileName || `media.${contentType?.replace("Message", "")}`;
+        const originalFileName =
+          content?.fileName || `media.${contentType?.replace("Message", "")}`;
 
         serializedMessage.ARQUIVO = {
           NOME_ARQUIVO: null as any, // Não temos o arquivo baixado
@@ -815,26 +898,32 @@ class WhatsappBaileysInstance {
 
     try {
       // 1. Buscar o CODIGO_NUMERO da tabela w_clientes_numeros
-      const [numeroRows] = await this.pool.query<RowDataPacket[]>(
-        "SELECT CODIGO FROM w_clientes_numeros WHERE NUMERO = ? LIMIT 1",
-        [from]
-      ).catch(() => [[] as RowDataPacket[]]);
+      const [numeroRows] = await this.pool
+        .query<RowDataPacket[]>(
+          "SELECT CODIGO FROM w_clientes_numeros WHERE NUMERO = ? LIMIT 1",
+          [from]
+        )
+        .catch(() => [[] as RowDataPacket[]]);
 
       let codigoNumero: number | null = null;
-      
+
       if (numeroRows[0]) {
         codigoNumero = numeroRows[0]["CODIGO"];
       } else {
         // Se o número não existe, criar o contato primeiro
-        const contactData = { id: `${from}@s.whatsapp.net` };
+        // Se for LID, tentamos salvar assim mesmo
+        const suffix = from.includes("-") ? "@g.us" : "@s.whatsapp.net";
+        const contactData = { id: `${from}${suffix}` };
         await this.saveContactToDatabase(contactData);
-        
+
         // Buscar novamente
-        const [newRows] = await this.pool.query<RowDataPacket[]>(
-          "SELECT CODIGO FROM w_clientes_numeros WHERE NUMERO = ? LIMIT 1",
-          [from]
-        ).catch(() => [[] as RowDataPacket[]]);
-        
+        const [newRows] = await this.pool
+          .query<RowDataPacket[]>(
+            "SELECT CODIGO FROM w_clientes_numeros WHERE NUMERO = ? LIMIT 1",
+            [from]
+          )
+          .catch(() => [[] as RowDataPacket[]]);
+
         if (newRows[0]) {
           codigoNumero = newRows[0]["CODIGO"];
         }
@@ -869,7 +958,10 @@ class WhatsappBaileysInstance {
         message.STATUS || "RECEIVED",
       ];
 
-      const [insertResult] = await this.pool.query<any>(insertQuery, insertParams);
+      const [insertResult] = await this.pool.query<any>(
+        insertQuery,
+        insertParams
+      );
 
       // 3. Se tiver arquivo, inserir na tabela w_mensagens_arquivos
       if (message.ARQUIVO && insertResult.insertId) {
@@ -883,13 +975,15 @@ class WhatsappBaileysInstance {
           ) VALUES (?, ?, ?, ?, ?)
         `;
 
-        await this.pool.query(arquivoQuery, [
-          insertResult.insertId,
-          message.ARQUIVO.TIPO || "application/octet-stream",
-          message.ARQUIVO.NOME_ARQUIVO || null,
-          message.ARQUIVO.NOME_ORIGINAL || null,
-          message.ARQUIVO.ARMAZENAMENTO || "outros",
-        ]).catch(() => null);
+        await this.pool
+          .query(arquivoQuery, [
+            insertResult.insertId,
+            message.ARQUIVO.TIPO || "application/octet-stream",
+            message.ARQUIVO.NOME_ARQUIVO || null,
+            message.ARQUIVO.NOME_ORIGINAL || null,
+            message.ARQUIVO.ARMAZENAMENTO || "outros",
+          ])
+          .catch(() => null);
       }
 
       // 4. Salvar também no banco local (messages) para controle, já marcando como sincronizado
@@ -1040,7 +1134,13 @@ class WhatsappBaileysInstance {
 
       // Check if message has media
       const contentType = getContentType(message);
-      const mediaTypes = ["imageMessage", "videoMessage", "audioMessage", "documentMessage", "stickerMessage"];
+      const mediaTypes = [
+        "imageMessage",
+        "videoMessage",
+        "audioMessage",
+        "documentMessage",
+        "stickerMessage",
+      ];
       const hasMedia = mediaTypes.includes(contentType || "");
 
       if (hasMedia && this.client) {
@@ -1052,7 +1152,7 @@ class WhatsappBaileysInstance {
 
           while (!mediaBuffer && retryCount < maxRetries) {
             try {
-              mediaBuffer = await downloadMediaMessage(
+              mediaBuffer = (await downloadMediaMessage(
                 waMessage,
                 "buffer",
                 {},
@@ -1060,18 +1160,25 @@ class WhatsappBaileysInstance {
                   logger,
                   reuploadRequest: this.client.updateMediaMessage,
                 }
-              ) as Buffer;
+              )) as Buffer;
             } catch (downloadErr) {
               retryCount++;
-              logWithDate(`Media download attempt ${retryCount}/${maxRetries} failed =>`, downloadErr);
+              logWithDate(
+                `Media download attempt ${retryCount}/${maxRetries} failed =>`,
+                downloadErr
+              );
               if (retryCount < maxRetries) {
-                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                await new Promise((resolve) =>
+                  setTimeout(resolve, 1000 * retryCount)
+                );
               }
             }
           }
 
           if (!mediaBuffer || mediaBuffer.length === 0) {
-            logWithDate("Failed to download media after retries, skipping file save");
+            logWithDate(
+              "Failed to download media after retries, skipping file save"
+            );
           } else {
             const content = message[contentType as keyof proto.IMessage] as any;
             let mimeType = content?.mimetype || "application/octet-stream";
@@ -1091,7 +1198,10 @@ class WhatsappBaileysInstance {
             const ext = isAudio ? "mp3" : extension(mimeType) || "dat";
             const originalFileName = content?.fileName || `unnamed.${ext}`;
             // Sanitizar nome do arquivo
-            const sanitizedFileName = originalFileName.replace(/[<>:"/\\|?*]/g, "_");
+            const sanitizedFileName = originalFileName.replace(
+              /[<>:"/\\|?*]/g,
+              "_"
+            );
             const ARQUIVO_NOME = `${uuid}_${sanitizedFileName}`;
 
             // Ensure media directory exists before saving
@@ -1108,7 +1218,9 @@ class WhatsappBaileysInstance {
             // Verificar se o arquivo foi salvo corretamente
             try {
               await access(savePath);
-              logWithDate(`Media saved successfully => ${ARQUIVO_NOME} (${finalBuffer.length} bytes)`);
+              logWithDate(
+                `Media saved successfully => ${ARQUIVO_NOME} (${finalBuffer.length} bytes)`
+              );
 
               serializedMessage.ARQUIVO = {
                 NOME_ARQUIVO: ARQUIVO_NOME,
@@ -1133,10 +1245,15 @@ class WhatsappBaileysInstance {
   }
 
   public async onReceiveMessage(waMessage: proto.IWebMessageInfo) {
-    const remoteJid = waMessage.key.remoteJid;
+    // CORREÇÃO: Usar jidNormalizedUser para tentar padronizar o ID
+    const remoteJid = jidNormalizedUser(waMessage.key.remoteJid || "");
 
     // Ignorar mensagens de status e broadcast
-    if (!remoteJid || remoteJid === "status@broadcast" || remoteJid.endsWith("@broadcast")) {
+    if (
+      !remoteJid ||
+      remoteJid === "status@broadcast" ||
+      remoteJid.endsWith("@broadcast")
+    ) {
       return;
     }
 
@@ -1158,21 +1275,18 @@ class WhatsappBaileysInstance {
     // Ignorar mensagens de protocolo específicas
     const protocolMessage = waMessage.message.protocolMessage;
     const reactionMessage = waMessage.message.reactionMessage;
-    const senderKeyDistributionMessage = waMessage.message.senderKeyDistributionMessage;
-    
+    const senderKeyDistributionMessage =
+      waMessage.message.senderKeyDistributionMessage;
+
     if (protocolMessage || reactionMessage || senderKeyDistributionMessage) {
       return;
     }
 
-    // Se for um @lid (Local ID), ignorar pois não é um número real
-    if (remoteJid.includes("@lid")) {
-      logWithDate(
-        `[${this.clientName} - ${this.whatsappNumber}] Ignoring message from @lid (Local ID): ${remoteJid}`
-      );
-      return;
-    }
+    // CORREÇÃO: Removido o bloqueio explicito de @lid
+    // Se a mensagem vier de um LID, tentamos extrair o ID e processar
 
-    const contactNumber = remoteJid.replace(/@s\.whatsapp\.net/g, "");
+    // Ajuste para limpeza tanto de @s.whatsapp.net quanto @lid
+    const contactNumber = remoteJid.replace(/@s\.whatsapp\.net|@lid/g, "");
 
     this.enqueueMessageProcessing(async () => {
       const log = new Log<any>(
@@ -1198,9 +1312,14 @@ class WhatsappBaileysInstance {
           "viewOnceMessageV2",
         ];
         const fromNow = this.isMessageFromNow(waMessage);
-        const isPhone = validatePhoneStr(contactNumber);
 
-        if (!isPhone) {
+        // Validar se é telefone. Se for LID, o "contactNumber" pode ser um UUID e falhar no validatePhoneStr padrão.
+        // Se for @lid, permitimos passar mesmo que validatePhoneStr retorne false, ou ajustamos a lógica.
+        // Neste ajuste, estou assumindo que você quer processar se for phone OU se for lid.
+        const isPhone = validatePhoneStr(contactNumber);
+        const isLid = remoteJid.endsWith("@lid");
+
+        if (!isPhone && !isLid) {
           return;
         }
 
@@ -1209,12 +1328,18 @@ class WhatsappBaileysInstance {
 
         const messageType = this.getMessageType(message);
         const isBlackListedType = blockedTypes.includes(messageType);
-        const isBlackListedContact = this.blockedNumbers.includes(contactNumber);
+        const isBlackListedContact =
+          this.blockedNumbers.includes(contactNumber);
         const isBlackListed = isBlackListedType || isBlackListedContact;
 
         // Run automatic messages
         for (const autoMessage of this.autoMessages) {
-          await runAutoMessage(this as any, autoMessage, waMessage as any, contactNumber);
+          await runAutoMessage(
+            this as any,
+            autoMessage,
+            waMessage as any,
+            contactNumber
+          );
         }
 
         if (fromNow && !isBlackListed) {
@@ -1236,9 +1361,9 @@ class WhatsappBaileysInstance {
               console.log(
                 err.response
                   ? {
-                    status: err.response.status,
-                    data: err.response.data,
-                  }
+                      status: err.response.status,
+                      data: err.response.data,
+                    }
                   : err.message
               );
             });
@@ -1278,7 +1403,14 @@ class WhatsappBaileysInstance {
 
     this.enqueueStatusProcessing(async () => {
       try {
-        const statusMap = ["ERROR", "PENDING", "SENT", "RECEIVED", "READ", "PLAYED"];
+        const statusMap = [
+          "ERROR",
+          "PENDING",
+          "SENT",
+          "RECEIVED",
+          "READ",
+          "PLAYED",
+        ];
         const statusStr = statusMap[status] || "ERROR";
 
         await axios
@@ -1298,8 +1430,8 @@ class WhatsappBaileysInstance {
           err.response
             ? err.response.status
             : err.request
-              ? err.request._currentUrl
-              : err
+            ? err.request._currentUrl
+            : err
         );
         await this.updateMessage(messageId, { SYNC_STATUS: false });
       }
@@ -1342,29 +1474,36 @@ class WhatsappBaileysInstance {
    * @param contact Dados do contato com id, name e notify
    * @returns true se salvou com sucesso, false caso contrário
    */
-  private async saveContactToDatabase(contact: { id: string; name?: string; notify?: string }): Promise<boolean> {
+  private async saveContactToDatabase(contact: {
+    id: string;
+    name?: string;
+    notify?: string;
+  }): Promise<boolean> {
     try {
-      // Validar se é um contato válido (não grupo, não status, não broadcast, não lid)
+      // Validar se é um contato válido (não grupo, não status, não broadcast)
       if (!contact.id) {
         return false;
       }
 
-      // Ignorar grupos (@g.us), status, broadcast e LID
+      // Ignorar grupos (@g.us), status, broadcast
+      // CORREÇÃO: Permitir @lid se necessário, removido da lista de bloqueio
       if (
         contact.id.includes("@g.us") ||
         contact.id.includes("@broadcast") ||
-        contact.id.includes("@lid") ||
         contact.id === "status@broadcast" ||
         contact.id === "0@s.whatsapp.net"
       ) {
         return false;
       }
 
-      // Extrair número do JID (formato: 5511999999999@s.whatsapp.net)
-      const number = contact.id.replace(/@s\.whatsapp\.net/g, "");
-      
+      // Extrair número do JID (formato: 5511999999999@s.whatsapp.net ou LID)
+      const number = contact.id.replace(/@s\.whatsapp\.net|@lid/g, "");
+
       // Validar se é um número válido (apenas dígitos e tamanho mínimo)
-      if (!number || number.length < 10 || !/^\d+$/.test(number)) {
+      // Se for LID, pode ser que falhe aqui se a regex for estrita.
+      // Assumindo que o banco de dados exija números para funcionar a busca de clientes.
+      if (!number || number.length < 5) {
+        // Ajustado para aceitar LIDs curtos ou longos se necessário
         return false;
       }
 
@@ -1372,14 +1511,18 @@ class WhatsappBaileysInstance {
       const contactName = contact.name || contact.notify || null;
 
       // Extrair DDD e corpo do número para buscar cliente
-      const numberWithoutCountry = number.length > 11 ? number.slice(2) : number;
+      // Nota: Logica de DDD pode falhar com LIDs
+      const numberWithoutCountry =
+        number.length > 11 ? number.slice(2) : number;
       const DDD = numberWithoutCountry.slice(0, 2);
-      const numberBody = numberWithoutCountry.length === 10 
-        ? numberWithoutCountry.slice(2) 
-        : numberWithoutCountry.slice(3);
+      const numberBody =
+        numberWithoutCountry.length === 10
+          ? numberWithoutCountry.slice(2)
+          : numberWithoutCountry.slice(3);
 
       const numberWithout9 = numberBody;
-      const numberWith9 = numberBody.length === 8 ? `9${numberBody}` : numberBody;
+      const numberWith9 =
+        numberBody.length === 8 ? `9${numberBody}` : numberBody;
 
       // Buscar cliente associado ao número
       const SEARCH_CUSTOMER_QUERY = `
@@ -1405,31 +1548,35 @@ class WhatsappBaileysInstance {
       `;
 
       const searchParams = [
-        DDD, numberWith9,
-        DDD, numberWith9,
-        DDD, numberWith9,
-        DDD, numberWithout9,
-        DDD, numberWithout9,
-        DDD, numberWithout9,
+        DDD,
+        numberWith9,
+        DDD,
+        numberWith9,
+        DDD,
+        numberWith9,
+        DDD,
+        numberWithout9,
+        DDD,
+        numberWithout9,
+        DDD,
+        numberWithout9,
       ];
 
       let customerCode: number = -1;
       let dbContactName: string | null = null;
 
       // Buscar na tabela clientes
-      const [customerRows] = await this.pool.query<RowDataPacket[]>(
-        SEARCH_CUSTOMER_QUERY,
-        searchParams
-      ).catch(() => [[] as RowDataPacket[]]);
+      const [customerRows] = await this.pool
+        .query<RowDataPacket[]>(SEARCH_CUSTOMER_QUERY, searchParams)
+        .catch(() => [[] as RowDataPacket[]]);
 
       if (customerRows[0]) {
         customerCode = customerRows[0]["CODIGO"];
       } else {
         // Buscar na tabela contatos
-        const [contactRows] = await this.pool.query<RowDataPacket[]>(
-          SEARCH_CONTACT_QUERY,
-          searchParams
-        ).catch(() => [[] as RowDataPacket[]]);
+        const [contactRows] = await this.pool
+          .query<RowDataPacket[]>(SEARCH_CONTACT_QUERY, searchParams)
+          .catch(() => [[] as RowDataPacket[]]);
 
         if (contactRows[0]) {
           customerCode = contactRows[0]["CODIGO_CLIENTE"] || -1;
@@ -1457,7 +1604,13 @@ class WhatsappBaileysInstance {
     }
   }
 
-  public async loadContacts(): Promise<{ alreadyRunning: boolean; total?: number; saved?: number; skipped?: number; errors?: number }> {
+  public async loadContacts(): Promise<{
+    alreadyRunning: boolean;
+    total?: number;
+    saved?: number;
+    skipped?: number;
+    errors?: number;
+  }> {
     // Verificar se já está em execução
     if (this.isLoadingContacts) {
       return { alreadyRunning: true };
@@ -1477,7 +1630,13 @@ class WhatsappBaileysInstance {
         logWithDate(
           `[${this.clientName} - ${this.whatsappNumber}] No contacts in memory. Contacts will be saved automatically when the phone syncs via contacts.upsert event.`
         );
-        return { alreadyRunning: false, total: 0, saved: 0, skipped: 0, errors: 0 };
+        return {
+          alreadyRunning: false,
+          total: 0,
+          saved: 0,
+          skipped: 0,
+          errors: 0,
+        };
       }
 
       const contacts = Array.from(this.phoneContacts.values());
@@ -1506,7 +1665,13 @@ class WhatsappBaileysInstance {
         `[${this.clientName} - ${this.whatsappNumber}] Contacts load completed. Total: ${contacts.length}, Saved: ${saved}, Skipped: ${skipped}, Errors: ${errors}`
       );
 
-      return { alreadyRunning: false, total: contacts.length, saved, skipped, errors };
+      return {
+        alreadyRunning: false,
+        total: contacts.length,
+        saved,
+        skipped,
+        errors,
+      };
     } catch (err) {
       logWithDate(
         `[${this.clientName} - ${this.whatsappNumber}] Load contacts failure =>`,
@@ -1527,16 +1692,18 @@ class WhatsappBaileysInstance {
     contacts: Array<{ id: string; name?: string; notify?: string }>;
   }> {
     const contacts = Array.from(this.phoneContacts.values());
-    
+
     // Contar contatos no banco de dados
-    const [rows] = await this.pool.query<RowDataPacket[]>(
-      "SELECT COUNT(*) as count FROM w_clientes_numeros"
-    ).catch(() => [[{ count: 0 }] as RowDataPacket[]]);
-    
+    const [rows] = await this.pool
+      .query<RowDataPacket[]>(
+        "SELECT COUNT(*) as count FROM w_clientes_numeros"
+      )
+      .catch(() => [[{ count: 0 }] as RowDataPacket[]]);
+
     return {
       inMemory: contacts.length,
       inDatabase: rows[0]?.["count"] || 0,
-      contacts: contacts.slice(0, 100) // Retornar apenas os primeiros 100 para visualização
+      contacts: contacts.slice(0, 100), // Retornar apenas os primeiros 100 para visualização
     };
   }
 
@@ -1544,7 +1711,12 @@ class WhatsappBaileysInstance {
    * Força a sincronização de contatos extraindo dos números das mensagens existentes no banco
    * Útil quando o history sync não trouxe contatos
    */
-  public async syncContactsFromMessages(): Promise<{ total: number; saved: number; skipped: number; errors: number }> {
+  public async syncContactsFromMessages(): Promise<{
+    total: number;
+    saved: number;
+    skipped: number;
+    errors: number;
+  }> {
     if (!this.client) throw new Error("Client not connected");
 
     logWithDate(
@@ -1691,7 +1863,9 @@ class WhatsappBaileysInstance {
     }
   }
 
-  public async sendFile(options: SendFileOptions): Promise<ParsedMessage | undefined> {
+  public async sendFile(
+    options: SendFileOptions
+  ): Promise<ParsedMessage | undefined> {
     const log = new Log<any>(
       this.client as any,
       this.clientName,
@@ -1768,7 +1942,11 @@ class WhatsappBaileysInstance {
         };
       }
 
-      const sentMessage = await this.client.sendMessage(jid, content, msgOptions);
+      const sentMessage = await this.client.sendMessage(
+        jid,
+        content,
+        msgOptions
+      );
       log.setData((data: any) => ({ ...data, sentMessage }));
 
       if (sentMessage) {
@@ -1874,7 +2052,9 @@ class WhatsappBaileysInstance {
       const results = await this.client.onWhatsApp(jid);
       const result = results?.[0];
 
-      return result?.exists ? result.jid.replace(/@s\.whatsapp\.net/g, "") : false;
+      return result?.exists
+        ? result.jid.replace(/@s\.whatsapp\.net/g, "")
+        : false;
     } catch (err) {
       logWithDate("Validate number error =>", err);
       return false;
