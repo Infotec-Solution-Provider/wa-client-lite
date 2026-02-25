@@ -19,6 +19,7 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
   Browsers,
+  WAVersion,
 } from "@whiskeysockets/baileys";
 import { useMySQLAuthState } from "mysql-baileys";
 import { Boom } from "@hapi/boom";
@@ -272,15 +273,16 @@ class WhatsappBaileysInstance {
 
   private async connectToWhatsApp() {
     // Fetch latest Baileys version
-    const { error, version } = await fetchLatestBaileysVersion();
+    //const { error, version } = await fetchLatestBaileysVersion();
 
-    if (error) {
+    const version: WAVersion = [2, 3000, 1033105955];
+    /* if (error) {
       logWithDate(
         `[${this.clientName} - ${this.whatsappNumber}] No connection to fetch version, retrying...`
       );
       setTimeout(() => this.connectToWhatsApp(), 5000);
       return;
-    }
+    } */
 
     logWithDate(
       `[${this.clientName} - ${this.whatsappNumber}] Using Baileys version: ${version.join(".")}`
@@ -294,12 +296,12 @@ class WhatsappBaileysInstance {
     try {
       const authState = await useMySQLAuthState({
         session: `${this.clientName}_${this.whatsappNumber}`,
-        host: process.env["BAILEYS_AUTH_DB_HOST"] || "localhost",
-        port: Number(process.env["BAILEYS_AUTH_DB_PORT"]) || 3306,
-        user: process.env["BAILEYS_AUTH_DB_USER"] || "root",
-        password: process.env["BAILEYS_AUTH_DB_PASS"] || "",
-        database: process.env["BAILEYS_AUTH_DB_NAME"] || "baileys_auth",
-        tableName: process.env["BAILEYS_AUTH_TABLE_NAME"] || "auth",
+        host: process.env["DATABASE_HOST"] || "localhost",
+        port: Number(process.env["DATABASE_PORT"]) || 3306,
+        user: process.env["DATABASE_USER"] || "root",
+        password: process.env["DATABASE_PASS"] || "",
+        database: process.env["DATABASE_NAME"] || "baileys_auth",
+        tableName: process.env["DATABASE_TABLE_NAME"] || "auth",
       });
       state = authState.state;
       saveCreds = authState.saveCreds;
@@ -362,7 +364,7 @@ class WhatsappBaileysInstance {
       if (connection === "close") {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
         const errorMessage = (lastDisconnect?.error as Boom)?.message || "";
-        
+
         // Immediately mark as not ready to prevent sending messages
         this.isReady = false;
         this.isAuthenticated = false;
@@ -384,9 +386,9 @@ class WhatsappBaileysInstance {
 
           // Reconnect after clearing credentials
           setTimeout(() => this.connectToWhatsApp(), 5000);
-        } else if (statusCode === DisconnectReason.restartRequired || 
-                   errorMessage.includes("QR refs") ||
-                   errorMessage.includes("Stream Errored")) {
+        } else if (statusCode === DisconnectReason.restartRequired ||
+          errorMessage.includes("QR refs") ||
+          errorMessage.includes("Stream Errored")) {
           // Restart required or QR expired - reconnect immediately without delay
           logWithDate(
             `[${this.clientName} - ${this.whatsappNumber}] Restart required or QR expired. Reconnecting immediately...`
@@ -394,9 +396,9 @@ class WhatsappBaileysInstance {
           this.reconnectAttempts = 0;
           setTimeout(() => this.connectToWhatsApp(), 2000);
         } else if (statusCode === DisconnectReason.connectionClosed ||
-                   statusCode === DisconnectReason.connectionLost ||
-                   statusCode === DisconnectReason.connectionReplaced ||
-                   statusCode === DisconnectReason.timedOut) {
+          statusCode === DisconnectReason.connectionLost ||
+          statusCode === DisconnectReason.connectionReplaced ||
+          statusCode === DisconnectReason.timedOut) {
           // Connection issues - use exponential backoff
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
@@ -487,10 +489,10 @@ class WhatsappBaileysInstance {
       logWithDate(
         `[${this.clientName} - ${this.whatsappNumber}] Received ${contacts.length} contacts from phone`
       );
-      
+
       let saved = 0;
       let skipped = 0;
-      
+
       for (const contact of contacts) {
         if (contact.id && !contact.id.includes("@g.us")) {
           const contactData: { id: string; name?: string; notify?: string } = {
@@ -499,14 +501,14 @@ class WhatsappBaileysInstance {
           if (contact.name) contactData.name = contact.name;
           if (contact.notify) contactData.notify = contact.notify;
           this.phoneContacts.set(contact.id, contactData);
-          
+
           // Salvar contato diretamente no banco de dados
           const result = await this.saveContactToDatabase(contactData).catch(() => false);
           if (result) saved++;
           else skipped++;
         }
       }
-      
+
       if (saved > 0) {
         logWithDate(
           `[${this.clientName} - ${this.whatsappNumber}] Contacts saved to database: ${saved} saved, ${skipped} skipped`
@@ -749,10 +751,10 @@ class WhatsappBaileysInstance {
 
     for (const waMessage of messages) {
       try {
-          if (!this.shouldSyncHistoryMessage(waMessage)) {
-            skipped++;
-            continue;
-          }
+        if (!this.shouldSyncHistoryMessage(waMessage)) {
+          skipped++;
+          continue;
+        }
 
         const remoteJid = waMessage.key?.remoteJid;
 
@@ -903,20 +905,20 @@ class WhatsappBaileysInstance {
       ).catch(() => [[] as RowDataPacket[]]);
 
       let codigoNumero: number | null = null;
-      
+
       if (numeroRows[0]) {
         codigoNumero = numeroRows[0]["CODIGO"];
       } else {
         // Se o número não existe, criar o contato primeiro
         const contactData = { id: `${from}@s.whatsapp.net` };
         await this.saveContactToDatabase(contactData);
-        
+
         // Buscar novamente
         const [newRows] = await this.pool.query<RowDataPacket[]>(
           "SELECT CODIGO FROM w_clientes_numeros WHERE NUMERO = ? LIMIT 1",
           [from]
         ).catch(() => [[] as RowDataPacket[]]);
-        
+
         if (newRows[0]) {
           codigoNumero = newRows[0]["CODIGO"];
         }
@@ -1254,7 +1256,7 @@ class WhatsappBaileysInstance {
     const protocolMessage = waMessage.message.protocolMessage;
     const reactionMessage = waMessage.message.reactionMessage;
     const senderKeyDistributionMessage = waMessage.message.senderKeyDistributionMessage;
-    
+
     if (protocolMessage || reactionMessage || senderKeyDistributionMessage) {
       return;
     }
@@ -1472,7 +1474,7 @@ class WhatsappBaileysInstance {
 
       // Extrair número do JID (formato: 5511999999999@s.whatsapp.net)
       const number = contact.id.replace(/@s\.whatsapp\.net/g, "");
-      
+
       // Validar se é um número válido (apenas dígitos e tamanho mínimo)
       if (!number || number.length < 10 || !/^\d+$/.test(number)) {
         return false;
@@ -1484,8 +1486,8 @@ class WhatsappBaileysInstance {
       // Extrair DDD e corpo do número para buscar cliente
       const numberWithoutCountry = number.length > 11 ? number.slice(2) : number;
       const DDD = numberWithoutCountry.slice(0, 2);
-      const numberBody = numberWithoutCountry.length === 10 
-        ? numberWithoutCountry.slice(2) 
+      const numberBody = numberWithoutCountry.length === 10
+        ? numberWithoutCountry.slice(2)
         : numberWithoutCountry.slice(3);
 
       const numberWithout9 = numberBody;
@@ -1637,12 +1639,12 @@ class WhatsappBaileysInstance {
     contacts: Array<{ id: string; name?: string; notify?: string }>;
   }> {
     const contacts = Array.from(this.phoneContacts.values());
-    
+
     // Contar contatos no banco de dados
     const [rows] = await this.pool.query<RowDataPacket[]>(
       "SELECT COUNT(*) as count FROM w_clientes_numeros"
     ).catch(() => [[{ count: 0 }] as RowDataPacket[]]);
-    
+
     return {
       inMemory: contacts.length,
       inDatabase: rows[0]?.["count"] || 0,
@@ -1839,7 +1841,7 @@ class WhatsappBaileysInstance {
       }
 
       const msgOptions: MiscMessageGenerationOptions = {};
-      if(msgOptions && msgOptions.quoted == null && msgOptions.quoted == undefined) return ;
+      if (msgOptions && msgOptions.quoted == null && msgOptions.quoted == undefined) return;
       if (quotedMessageId) {
         msgOptions.quoted = {
           key: {
