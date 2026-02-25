@@ -73,6 +73,7 @@ class WhatsappBaileysInstance {
   private removeCreds: (() => Promise<void>) | null = null;
   private phoneContacts: Map<string, { id: string; name?: string; notify?: string }> = new Map();
   private isLoadingContacts: boolean = false;
+  private readonly historyMinDate: Date | null;
 
   constructor(
     clientName: string,
@@ -84,6 +85,7 @@ class WhatsappBaileysInstance {
     this.whatsappNumber = whatsappNumber;
     this.requestURL = requestURL;
     this.connectionParams = connection;
+    this.historyMinDate = this.buildHistoryMinDate();
 
     schedule(process.env["CRON_LOAD_AVATARS"] || "0 */4 * * *", async () => {
       try {
@@ -126,6 +128,78 @@ class WhatsappBaileysInstance {
     }
 
     this.contactProcessing.set(contactNumber, false);
+  }
+
+  private buildHistoryMinDate(): Date | null {
+    const historyMinDateEnv =
+      process.env["HISTORY-MIN-DATE"] || process.env["HISTORY_MIN_DATE"];
+
+    if (!historyMinDateEnv) {
+      return null;
+    }
+
+    const parsedDate = new Date(historyMinDateEnv);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Invalid HISTORY-MIN-DATE value: ${historyMinDateEnv}. Ignoring date filter.`
+      );
+      return null;
+    }
+
+    logWithDate(
+      `[${this.clientName} - ${this.whatsappNumber}] HISTORY-MIN-DATE enabled: ${parsedDate.toISOString()}`
+    );
+
+    return parsedDate;
+  }
+
+  private normalizeTimestampToMs(timestamp: unknown): number | null {
+    if (!timestamp) {
+      return null;
+    }
+
+    if (typeof timestamp === "string") {
+      const asNumber = Number(timestamp);
+      if (!Number.isFinite(asNumber)) {
+        return null;
+      }
+      return asNumber < 1e12 ? asNumber * 1000 : asNumber;
+    }
+
+    if (typeof timestamp === "number") {
+      if (!Number.isFinite(timestamp)) {
+        return null;
+      }
+      return timestamp < 1e12 ? timestamp * 1000 : timestamp;
+    }
+
+    if (typeof timestamp === "object" && timestamp !== null) {
+      const possibleLong = timestamp as { toNumber?: () => number };
+      if (typeof possibleLong.toNumber === "function") {
+        const value = possibleLong.toNumber();
+        if (!Number.isFinite(value)) {
+          return null;
+        }
+        return value < 1e12 ? value * 1000 : value;
+      }
+    }
+
+    return null;
+  }
+
+  private shouldSyncHistoryMessage(waMessage: proto.IWebMessageInfo): boolean {
+    if (!this.historyMinDate) {
+      return true;
+    }
+
+    const timestampMs = this.normalizeTimestampToMs(waMessage.messageTimestamp);
+    if (!timestampMs || timestampMs <= 0) {
+      return false;
+    }
+
+    const messageDate = new Date(timestampMs);
+    return messageDate >= this.historyMinDate;
   }
 
   private enqueueProcessing(
@@ -390,9 +464,11 @@ class WhatsappBaileysInstance {
 
     // Handle incoming messages
     this.client.ev.on("messages.upsert", async (m) => {
-      if (m.type === "notify") {
+      if (m.type === "notify" || m.type === "append") {
+        const isHistorySync = m.type === "append";
+
         for (const message of m.messages) {
-          await this.onReceiveMessage(message);
+          await this.onReceiveMessage(message, { isHistorySync });
         }
       }
     });
@@ -673,10 +749,15 @@ class WhatsappBaileysInstance {
 
     for (const waMessage of messages) {
       try {
+          if (!this.shouldSyncHistoryMessage(waMessage)) {
+            skipped++;
+            continue;
+          }
+
         const remoteJid = waMessage.key?.remoteJid;
 
         // Ignorar mensagens de status, broadcast e grupos
-        if (!remoteJid || remoteJid === "status@broadcast" || remoteJid.endsWith("@broadcast")) {
+        if (!remoteJid || remoteJid === "status@broadcast" || remoteJid.endsWith("@broadcast") || remoteJid.endsWith("@newsletter")) {
           skipped++;
           continue;
         }
@@ -1135,21 +1216,27 @@ class WhatsappBaileysInstance {
     }
   }
 
-  public async onReceiveMessage(waMessage: proto.IWebMessageInfo) {
+  public async onReceiveMessage(
+    waMessage: proto.IWebMessageInfo,
+    options?: { isHistorySync?: boolean }
+  ) {
+    const isHistorySync = options?.isHistorySync === true;
     const remoteJidAlt = (waMessage as any)?.key?.remoteJidAlt as
       | string
       | undefined;
-    if (!remoteJidAlt) {
+    const remoteJid = waMessage?.key?.remoteJid || remoteJidAlt;
+
+    if (!remoteJid) {
       return;
     }
-    console.log("Received message from remoteJid:", remoteJidAlt, waMessage);
+    console.log("Received message from remoteJid:", remoteJid, waMessage);
     // Ignorar mensagens de status e broadcast
-    if (remoteJidAlt === "status@broadcast" || remoteJidAlt.endsWith("@broadcast")) {
+    if (remoteJid === "status@broadcast" || remoteJid.endsWith("@broadcast") || remoteJid.endsWith("@newsletter")) {
       return;
     }
 
     // Ignorar mensagens de grupo
-    if (remoteJidAlt.includes("@g.us")) {
+    if (remoteJid.includes("@g.us")) {
       return;
     }
 
@@ -1173,14 +1260,14 @@ class WhatsappBaileysInstance {
     }
 
     // Se ainda for @lid (Local ID) sem remoteJidAlt, ignorar
-    if (remoteJidAlt.includes("@lid")) {
+    if (remoteJid.includes("@lid")) {
       logWithDate(
-        `[${this.clientName} - ${this.whatsappNumber}] Ignoring message from @lid (Local ID): ${remoteJidAlt}`
+        `[${this.clientName} - ${this.whatsappNumber}] Ignoring message from @lid (Local ID): ${remoteJid}`
       );
       return;
     }
 
-    const contactNumber = remoteJidAlt.replace(/@s\.whatsapp\.net/g, "");
+    const contactNumber = remoteJid.replace(/@s\.whatsapp\.net/g, "");
 
     this.enqueueMessageProcessing(async () => {
       const log = new Log<any>(
@@ -1188,10 +1275,14 @@ class WhatsappBaileysInstance {
         this.clientName,
         "receive-message",
         `${waMessage.key?.id}`,
-        { message: waMessage, remoteJidAlt }
+        { message: waMessage, remoteJid }
       );
 
       try {
+        if (isHistorySync && !this.shouldSyncHistoryMessage(waMessage)) {
+          return;
+        }
+
         // Tipos de mensagens bloqueadas (notificações, chamadas, etc.)
         const blockedTypes = [
           "e2e_notification",
@@ -1219,6 +1310,17 @@ class WhatsappBaileysInstance {
         const isBlackListedType = blockedTypes.includes(messageType);
         const isBlackListedContact = this.blockedNumbers.includes(contactNumber);
         const isBlackListed = isBlackListedType || isBlackListedContact;
+
+        if (isHistorySync && !isBlackListed) {
+          const parsedHistoryMessage = await this.parseHistoryMessage(waMessage);
+
+          if (!parsedHistoryMessage) {
+            return;
+          }
+
+          await this.saveHistoryMessage(parsedHistoryMessage, contactNumber);
+          return;
+        }
 
         // Run automatic messages
         for (const autoMessage of this.autoMessages) {
