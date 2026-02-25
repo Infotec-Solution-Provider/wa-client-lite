@@ -1,3 +1,4 @@
+import "dotenv/config"
 import { Boom } from "@hapi/boom";
 import makeWASocket, {
   AnyMessageContent,
