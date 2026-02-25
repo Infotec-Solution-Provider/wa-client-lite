@@ -1,4 +1,21 @@
+import { Boom } from "@hapi/boom";
+import makeWASocket, {
+  AnyMessageContent,
+  Browsers,
+  DisconnectReason,
+  MiscMessageGenerationOptions,
+  WAMessage,
+  WAMessageKey,
+  WASocket,
+  WAVersion,
+  downloadMediaMessage,
+  getContentType,
+  makeCacheableSignalKeyStore,
+  proto
+} from "@whiskeysockets/baileys";
 import axios from "axios";
+import { extension } from "mime-types";
+import { useMySQLAuthState } from "mysql-baileys";
 import {
   ConnectionOptions,
   FieldPacket,
@@ -6,23 +23,17 @@ import {
   RowDataPacket,
   createPool,
 } from "mysql2/promise";
-import makeWASocket, {
-  DisconnectReason,
-  WASocket,
-  proto,
-  downloadMediaMessage,
-  getContentType,
-  WAMessageKey,
-  WAMessage,
-  AnyMessageContent,
-  MiscMessageGenerationOptions,
-  makeCacheableSignalKeyStore,
-  fetchLatestBaileysVersion,
-  Browsers,
-  WAVersion,
-} from "@whiskeysockets/baileys";
-import { useMySQLAuthState } from "mysql-baileys";
-import { Boom } from "@hapi/boom";
+import { schedule } from "node-cron";
+import { randomUUID } from "node:crypto";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import pino from "pino";
+import runAutoMessage from "./build-automatic-messages";
+import whatsappClientPool from "./connection";
+import loadAvatars from "./functions/loadAvatars";
+import loadMessages from "./functions/loadMessages";
+import Log from "./log";
+import { DBAutomaticMessage, ParsedMessage, SendFileOptions } from "./types";
 import {
   encodeParsedMessage,
   formatToOpusAudio,
@@ -30,18 +41,6 @@ import {
   mapToParsedMessage,
   validatePhoneStr,
 } from "./utils";
-import { DBAutomaticMessage, ParsedMessage, SendFileOptions } from "./types";
-import loadMessages from "./functions/loadMessages";
-import loadAvatars from "./functions/loadAvatars";
-import { schedule } from "node-cron";
-import runAutoMessage from "./build-automatic-messages";
-import Log from "./log";
-import whatsappClientPool from "./connection";
-import { join } from "node:path";
-import { writeFile, mkdir, access } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import { extension } from "mime-types";
-import pino from "pino";
 
 const filesPath = process.env["FILES_DIRECTORY"]!;
 
