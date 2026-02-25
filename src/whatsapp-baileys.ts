@@ -300,7 +300,7 @@ class WhatsappBaileysInstance {
         port: Number(process.env["DATABASE_PORT"]) || 3306,
         user: process.env["DATABASE_USER"] || "root",
         password: process.env["DATABASE_PASSWORD"] || "",
-        database: process.env["DATABASE_NAME"] || "baileys_auth",
+        database: process.env["DATABASE_DATABASE"] || "baileys_auth",
         tableName: process.env["DATABASE_TABLE_NAME"] || "auth",
       });
       state = authState.state;
