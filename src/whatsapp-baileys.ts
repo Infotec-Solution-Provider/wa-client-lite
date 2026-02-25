@@ -299,7 +299,7 @@ class WhatsappBaileysInstance {
         host: process.env["DATABASE_HOST"] || "localhost",
         port: Number(process.env["DATABASE_PORT"]) || 3306,
         user: process.env["DATABASE_USER"] || "root",
-        password: process.env["DATABASE_PASS"] || "",
+        password: process.env["DATABASE_PASSWORD"] || "",
         database: process.env["DATABASE_NAME"] || "baileys_auth",
         tableName: process.env["DATABASE_TABLE_NAME"] || "auth",
       });
