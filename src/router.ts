@@ -356,6 +356,12 @@ class AppRouter {
 					isAudio,
 				});
 
+				if (!sentMessageWithFile) {
+					return res.status(502).json({
+						message: "Failed to send file message to WhatsApp",
+					});
+				}
+
 				return res.status(201).json(sentMessageWithFile);
 			} else if (filename) {
 				const filePath = join(filesPath, "/media", filename);
@@ -371,6 +377,12 @@ class AppRouter {
 					contact: to,
 					caption: text,
 				});
+
+				if (!sentMessageWithFile) {
+					return res.status(502).json({
+						message: "Failed to send file message to WhatsApp",
+					});
+				}
 
 				return res.status(201).json(sentMessageWithFile);
 			} else {

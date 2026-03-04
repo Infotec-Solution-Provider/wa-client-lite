@@ -1841,7 +1841,6 @@ class WhatsappBaileysInstance {
       }
 
       const msgOptions: MiscMessageGenerationOptions = {};
-      if (msgOptions && msgOptions.quoted == null && msgOptions.quoted == undefined) return;
       if (quotedMessageId) {
         msgOptions.quoted = {
           key: {
