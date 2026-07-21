@@ -13,7 +13,7 @@ import makeWASocket, {
   getContentType,
   makeCacheableSignalKeyStore,
   proto
-} from "@whiskeysockets/baileys";
+} from "baileys";
 import axios from "axios";
 import { extension } from "mime-types";
 import { useMySQLAuthState } from "mysql-baileys";
