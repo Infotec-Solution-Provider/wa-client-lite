@@ -513,6 +513,16 @@ class WhatsappInstance {
         log.event("sent whatsapp message");
         log.setData((data) => ({ ...data, sentMessage }));
 
+        if (!sentMessage) {
+          log.setError(new Error("WhatsApp returned no message on send"));
+          log.save();
+          logWithDate(
+            `[${this.clientName} - ${this.whatsappNumber}] Send text failure => no message returned`
+          );
+
+          return undefined;
+        }
+
         const parsedMessage = await parseMessage(sentMessage);
         log.event("parsed message");
         log.setData((data) => ({ ...data, parsedMessage }));
@@ -571,6 +581,17 @@ class WhatsappInstance {
         sendSeen: false
       });
       log.setData((data) => ({ ...data, sentMessage }));
+
+      if (!sentMessage) {
+        log.setError(new Error("WhatsApp returned no message on send"));
+        log.save();
+        logWithDate(
+          `[${this.clientName} - ${this.whatsappNumber}] Send file failure => no message returned`
+        );
+
+        return undefined;
+      }
+
       const parsedMessage = await parseMessage(sentMessage);
       log.setData((data) => ({ ...data, parsedMessage }));
 

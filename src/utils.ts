@@ -26,11 +26,19 @@ export function isMessageFromNow(message: WAWebJS.Message) {
 
 export async function parseMessage(message: WAWebJS.Message) {
 	try {
+		if (!message) {
+			logWithDate("Parse Message Failure => message is undefined");
+
+			return null;
+		}
+
 		if (process.env["USE_LOCAL_DATE"]) {
 			message.timestamp = Date.now();
 		}
 
-		const quotedMessage = await message.getQuotedMessage();
+		const quotedMessage = message.hasQuotedMsg
+			? await message.getQuotedMessage()
+			: null;
 		const ID_REFERENCIA = quotedMessage && quotedMessage.id._serialized;
 		const ID = message.id._serialized;
 		const TIPO = message.type;
