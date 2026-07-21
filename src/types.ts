@@ -37,7 +37,7 @@ export interface DBAutomaticMessage {
 
 export interface ParsedMessage {
     ID: string;
-    ID_REFERENCIA?: string;
+    ID_REFERENCIA?: string | null;
     TIPO: string;
     MENSAGEM: string;
     TIMESTAMP: number;
