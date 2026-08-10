@@ -5,6 +5,7 @@ import { ParsedMessage } from "../types";
 import { logWithDate, parseMessage } from "../utils";
 import WhatsappInstance from "../whatsapp";
 import getNumberErpId from "./getNumberErpId";
+import getSerializedId from "./getSerializedId";
 
 async function loadMessages(instance: WhatsappInstance) {
     try {
@@ -36,7 +37,14 @@ async function loadMessages(instance: WhatsappInstance) {
 
 async function processChat(pool: Pool, instance: WhatsappInstance, chats: WAWebJS.Chat[], index: number) {
     const chat = chats[index]!;
-    const contact = await instance.client.getContactById(chat.id._serialized);
+    const chatId = getSerializedId(chat.id);
+
+    if (!chatId) {
+        logWithDate(`[${index + 1}/${chats.length}] Skipping chat without a serialized ID`);
+        return null;
+    }
+
+    const contact = await instance.client.getContactById(chatId);
     logWithDate(`[${index + 1}/${chats.length}] Loading Contact Messages: ${chat.id.user}...`);
 
     if (contact) {
@@ -69,14 +77,22 @@ async function parseAndSaveMessages(pool: Pool, messages: Array<WAWebJS.Message>
 
     for (const message of messages) {
         try {
-            const messageExist = await verifyMessageExist(pool, message.id._serialized);
+            const messageId = getSerializedId(message.id);
+
+            if (!messageId) {
+                logWithDate("Skipping message without a serialized ID");
+                failedInserts++;
+                continue;
+            }
+
+            const messageExist = await verifyMessageExist(pool, messageId);
 
             if (messageExist) {
                 alreadyExists++;
                 continue;
             }
 
-            console.log(`Parsing Message:`, message.type, message.id._serialized);
+            console.log(`Parsing Message:`, message.type, messageId);
             const parsedMessage = await parseMessage(message);
 
             if (!parsedMessage) {
@@ -90,7 +106,7 @@ async function parseAndSaveMessages(pool: Pool, messages: Array<WAWebJS.Message>
                 successfulInserts++;
             }
         } catch (err) {
-            logWithDate(`Failed to parse message ${message.id._serialized} =>`, err);
+            logWithDate(`Failed to parse message ${getSerializedId(message.id) || "unknown"} =>`, err);
             failedInserts++;
         }
     };

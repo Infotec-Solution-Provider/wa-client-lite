@@ -510,6 +510,22 @@ class AppRouter {
 
 					clientsStatus.push(instanceData);
 				}
+
+				if (instance instanceof WhatsappBaileysInstance) {
+					const instanceData = {
+						client: instance.clientName,
+						number: instance.whatsappNumber,
+						auth: instance.isAuthenticated,
+						ready: instance.isReady,
+						status: instance.isReady
+							? "CONNECTED"
+							: instance.isAuthenticated
+								? "AUTHENTICATED"
+								: "DISCONNECTED",
+					};
+
+					clientsStatus.push(instanceData);
+				}
 			}
 			logWithDate("Get clients statuses success!");
 			res.status(200).json({ instances: clientsStatus });

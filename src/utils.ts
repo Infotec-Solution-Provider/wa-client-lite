@@ -8,6 +8,7 @@ import { Router } from "express";
 import { config } from "dotenv";
 import { extension } from "mime-types";
 import { ParsedMessage } from "./types";
+import getSerializedId from "./functions/getSerializedId";
 import archiver from "archiver";
 import { createWriteStream } from "node:fs";
 
@@ -39,8 +40,13 @@ export async function parseMessage(message: WAWebJS.Message) {
 		const quotedMessage = message.hasQuotedMsg
 			? await message.getQuotedMessage()
 			: null;
-		const ID_REFERENCIA = quotedMessage && quotedMessage.id._serialized;
-		const ID = message.id._serialized;
+		const ID_REFERENCIA = getSerializedId(quotedMessage?.id);
+		const ID = getSerializedId(message.id);
+
+		if (!ID) {
+			logWithDate("Parse Message Failure => message has no serialized ID");
+			return null;
+		}
 		const TIPO = message.type;
 		const MENSAGEM = message.body;
 		const TIMESTAMP = process.env["USE_LOCAL_DATE"]

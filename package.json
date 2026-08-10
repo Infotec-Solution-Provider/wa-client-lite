@@ -50,6 +50,7 @@
   "scripts": {
     "start": "ts-node ./src/app.ts",
     "start:prod": "node ./dist/app.js",
-    "start:dev": "nodemon --exec ts-node ./src/app.ts"
+    "start:dev": "nodemon --exec ts-node ./src/app.ts",
+    "test:baileys": "node --require ts-node/register --test test/baileys-contact-identity.test.cjs"
   }
 }

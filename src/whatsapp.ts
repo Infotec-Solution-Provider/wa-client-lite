@@ -19,6 +19,7 @@ import {
 import { DBAutomaticMessage, ParsedMessage, SendFileOptions } from "./types";
 import loadMessages from "./functions/loadMessages";
 import loadAvatars from "./functions/loadAvatars";
+import getSerializedId from "./functions/getSerializedId";
 import { schedule } from "node-cron";
 import runAutoMessage from "./build-automatic-messages";
 import Log from "./log";
@@ -282,15 +283,21 @@ class WhatsappInstance {
       return;
     }
 
+    const messageId = getSerializedId(message.id);
+
     this.enqueueMessageProcessing(async () => {
       const log = new Log<any>(
         this.client,
         this.clientName,
         "receive-message",
-        `${message.id._serialized}`,
+        messageId || message.id.remote,
         { message }
       );
       try {
+        if (!messageId) {
+          throw new Error("Received message has no serialized ID");
+        }
+
         const blockedTypes = [
           "e2e_notification",
           "notification_template",
@@ -298,9 +305,6 @@ class WhatsappInstance {
           "gp2",
         ];
         const fromNow = isMessageFromNow(message);
-        const chat = await message.getChat();
-
-        message.from;
         const phone = message.from;
         const isGroup = phone.includes("@g.us");
 
@@ -312,7 +316,7 @@ class WhatsappInstance {
           );
           try {
             const contact = await message.getContact();
-            const numberId = contact.id._serialized;
+            const numberId = getSerializedId(contact.id);
 
             // Verificar se conseguimos o número real
             if (numberId && numberId.includes("@c.us")) {
@@ -355,7 +359,7 @@ class WhatsappInstance {
           await runAutoMessage(this, autoMessage, message, contactNumber);
         }
 
-        if (!chat.isGroup && fromNow && !isBlackListed && !isStatus) {
+        if (!isGroup && fromNow && !isBlackListed && !isStatus) {
           const parsedMessage = await parseMessage(message);
           log.setData((data) => ({ ...data, parsedMessage }));
 
@@ -397,7 +401,7 @@ class WhatsappInstance {
           }
 
           logWithDate(
-            `[${this.clientName} - ${this.whatsappNumber}] Message success => ${message.id._serialized}`
+            `[${this.clientName} - ${this.whatsappNumber}] Message success => ${parsedMessage.ID}`
           );
         }
       } catch (err: any) {
@@ -413,6 +417,15 @@ class WhatsappInstance {
   }
 
   public async onReceiveMessageStatus(message: WAWebJS.Message) {
+    const messageId = getSerializedId(message.id);
+
+    if (!messageId) {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Status ignored => message has no serialized ID`
+      );
+      return;
+    }
+
     this.enqueueStatusProcessing(async () => {
       try {
         const status =
@@ -420,15 +433,15 @@ class WhatsappInstance {
           "ERROR";
 
         await axios
-          .put(`${this.requestURL}/update_message/${message.id._serialized}`, {
+          .put(`${this.requestURL}/update_message/${messageId}`, {
             status,
           })
           .catch(() => null);
-        await this.updateMessage(message.id._serialized, {
+        await this.updateMessage(messageId, {
           SYNC_STATUS: true,
         });
         logWithDate(
-          `[${this.clientName} - ${this.whatsappNumber}] Status success => ${status} ${message.id._serialized}`
+          `[${this.clientName} - ${this.whatsappNumber}] Status success => ${status} ${messageId}`
         );
       } catch (err: any) {
         logWithDate(
@@ -439,15 +452,21 @@ class WhatsappInstance {
               ? err.request._currentUrl
               : err
         );
-        await this.updateMessage(message.id._serialized, {
+        await this.updateMessage(messageId, {
           SYNC_STATUS: false,
         });
       }
-    }, message.id._serialized);
+    }, messageId);
   }
 
   public async onEditMessage(message: WAWebJS.Message) {
     try {
+      const messageId = getSerializedId(message.id);
+
+      if (!messageId) {
+        throw new Error("Edited message has no serialized ID");
+      }
+
       const TIMESTAMP = Number(`${message.timestamp}000`);
 
       const changes = {
@@ -457,11 +476,11 @@ class WhatsappInstance {
       };
 
       await axios.post(
-        `${this.requestURL}/update_message/${message.id._serialized}`,
+        `${this.requestURL}/update_message/${messageId}`,
         changes
       );
       logWithDate(
-        `[${this.clientName} - ${this.whatsappNumber}] Message edit success => ${message.id._serialized}`
+        `[${this.clientName} - ${this.whatsappNumber}] Message edit success => ${messageId}`
       );
     } catch (err: any) {
       logWithDate(
@@ -503,7 +522,7 @@ class WhatsappInstance {
       log.event("started sendText function");
 
       const numberId = await this.client.getNumberId(contact);
-      const chatId = numberId && numberId._serialized;
+      const chatId = getSerializedId(numberId);
       log.event("fetched contact's whatsapp id");
       log.setData((data) => ({ ...data, chatId }));
 

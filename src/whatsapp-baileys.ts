@@ -29,6 +29,11 @@ import { randomUUID } from "node:crypto";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import pino from "pino";
+import {
+  BaileysContactIdentitySource,
+  getPhoneNumberFromBaileysJid,
+  resolveBaileysContactIdentity,
+} from "./baileys-contact-identity";
 import runAutoMessage from "./build-automatic-messages";
 import whatsappClientPool from "./connection";
 import loadAvatars from "./functions/loadAvatars";
@@ -206,6 +211,49 @@ class WhatsappBaileysInstance {
     return messageDate >= this.historyMinDate;
   }
 
+  private async resolveContactIdentity(
+    waMessage: proto.IWebMessageInfo,
+  ): Promise<{
+    contactNumber: string;
+    source: BaileysContactIdentitySource;
+  } | null> {
+    const key = waMessage.key as WAMessageKey | undefined;
+    const identity = resolveBaileysContactIdentity(key);
+
+    if (!identity) {
+      return null;
+    }
+
+    if (identity.contactNumber && identity.source) {
+      return {
+        contactNumber: identity.contactNumber,
+        source: identity.source,
+      };
+    }
+
+    if (!identity.lidJid || !this.client) {
+      return null;
+    }
+
+    try {
+      const mappedJid = await this.client.signalRepository.lidMapping.getPNForLID(
+        identity.lidJid,
+      );
+      const contactNumber = getPhoneNumberFromBaileysJid(mappedJid);
+
+      if (!contactNumber) {
+        return null;
+      }
+
+      return { contactNumber, source: "lid-mapping" };
+    } catch {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Failed to resolve LID mapping for incoming message ${waMessage.key?.id || "unknown"}.`,
+      );
+      return null;
+    }
+  }
+
   private enqueueProcessing(
     task: () => Promise<void>,
     type: string,
@@ -275,19 +323,19 @@ class WhatsappBaileysInstance {
   }
 
   private async connectToWhatsApp() {
-    // Fetch latest Baileys version
-    //const { error, version } = await fetchLatestBaileysVersion();
+    let version: [number, number, number] = [2, 3000, 1041589577];
 
-    const version = (await fetchLatestBaileysVersion())?.version || [
-      2, 3000, 1041589577,
-    ];
-    /* if (error) {
+    try {
+      const latestVersion = await fetchLatestBaileysVersion();
+
+      if (latestVersion?.version) {
+        version = latestVersion.version;
+      }
+    } catch {
       logWithDate(
-        `[${this.clientName} - ${this.whatsappNumber}] No connection to fetch version, retrying...`
+        `[${this.clientName} - ${this.whatsappNumber}] Failed to fetch the latest Baileys version; using the bundled fallback.`,
       );
-      setTimeout(() => this.connectToWhatsApp(), 5000);
-      return;
-    } */
+    }
 
     logWithDate(
       `[${this.clientName} - ${this.whatsappNumber}] Using Baileys version: ${version.join(".")}`,
@@ -301,12 +349,31 @@ class WhatsappBaileysInstance {
     try {
       const authState = await useMySQLAuthState({
         session: `${this.clientName}_${this.whatsappNumber}`,
-        host: process.env["DATABASE_HOST"] || "localhost",
-        port: Number(process.env["DATABASE_PORT"]) || 3306,
-        user: process.env["DATABASE_USER"] || "root",
-        password: process.env["DATABASE_PASSWORD"] || "",
-        database: process.env["DATABASE_DATABASE"] || "baileys_auth",
-        tableName: process.env["DATABASE_TABLE_NAME"] || "auth",
+        host:
+          process.env["BAILEYS_AUTH_DB_HOST"] ||
+          process.env["DATABASE_HOST"] ||
+          "localhost",
+        port:
+          Number(
+            process.env["BAILEYS_AUTH_DB_PORT"] ||
+              process.env["DATABASE_PORT"],
+          ) || 3306,
+        user:
+          process.env["BAILEYS_AUTH_DB_USER"] ||
+          process.env["DATABASE_USER"] ||
+          "root",
+        password:
+          process.env["BAILEYS_AUTH_DB_PASS"] ??
+          process.env["DATABASE_PASSWORD"] ??
+          "",
+        database:
+          process.env["BAILEYS_AUTH_DB_NAME"] ||
+          process.env["DATABASE_DATABASE"] ||
+          "baileys_auth",
+        tableName:
+          process.env["BAILEYS_AUTH_TABLE_NAME"] ||
+          process.env["DATABASE_TABLE_NAME"] ||
+          "auth",
       });
       state = authState.state;
       saveCreds = authState.saveCreds;
@@ -438,6 +505,12 @@ class WhatsappBaileysInstance {
               `[${this.clientName} - ${this.whatsappNumber}] Unknown disconnect reason. Reconnecting in ${delay}ms...`,
             );
             setTimeout(() => this.connectToWhatsApp(), delay);
+          } else {
+            logWithDate(
+              `[${this.clientName} - ${this.whatsappNumber}] Max reconnect attempts reached after an unknown disconnect. Will retry in 5 minutes...`,
+            );
+            this.reconnectAttempts = 0;
+            setTimeout(() => this.connectToWhatsApp(), 300000);
           }
         }
       } else if (connection === "open") {
@@ -799,26 +872,9 @@ class WhatsappBaileysInstance {
           continue;
         }
 
-        const remoteJid = waMessage.key?.remoteJid;
+        const contactIdentity = await this.resolveContactIdentity(waMessage);
 
-        // Ignorar mensagens de status, broadcast e grupos
-        if (
-          !remoteJid ||
-          remoteJid === "status@broadcast" ||
-          remoteJid.endsWith("@broadcast") ||
-          remoteJid.endsWith("@newsletter")
-        ) {
-          skipped++;
-          continue;
-        }
-
-        if (remoteJid.includes("@g.us")) {
-          skipped++;
-          continue;
-        }
-
-        // Ignorar mensagens com @lid (Local ID)
-        if (remoteJid.includes("@lid")) {
+        if (!contactIdentity) {
           skipped++;
           continue;
         }
@@ -844,7 +900,7 @@ class WhatsappBaileysInstance {
           continue;
         }
 
-        const contactNumber = remoteJid.replace(/@s\.whatsapp\.net/g, "");
+        const { contactNumber } = contactIdentity;
 
         // Validar se é um número de telefone válido
         if (!validatePhoneStr(contactNumber)) {
@@ -1093,16 +1149,6 @@ class WhatsappBaileysInstance {
     }
   }
 
-  private isMessageFromNow(message: proto.IWebMessageInfo): boolean {
-    const messageTimestamp = message.messageTimestamp as number;
-    const messageDate = new Date(messageTimestamp * 1000);
-    const currentDate = new Date();
-    const TWO_MINUTES = 1000 * 60 * 2;
-    const timeDifference = currentDate.getTime() - messageDate.getTime();
-
-    return timeDifference <= TWO_MINUTES;
-  }
-
   private getMessageType(message: proto.IMessage): string {
     const contentType = getContentType(message);
 
@@ -1308,28 +1354,6 @@ class WhatsappBaileysInstance {
     options?: { isHistorySync?: boolean },
   ) {
     const isHistorySync = options?.isHistorySync === true;
-    const remoteJidAlt = (waMessage as any)?.key?.remoteJidAlt as
-      | string
-      | undefined;
-    const remoteJid = waMessage?.key?.remoteJid || remoteJidAlt;
-
-    if (!remoteJid) {
-      return;
-    }
-    console.log("Received message from remoteJid:", remoteJid, waMessage);
-    // Ignorar mensagens de status e broadcast
-    if (
-      remoteJid === "status@broadcast" ||
-      remoteJid.endsWith("@broadcast") ||
-      remoteJid.endsWith("@newsletter")
-    ) {
-      return;
-    }
-
-    // Ignorar mensagens de grupo
-    if (remoteJid.includes("@g.us")) {
-      return;
-    }
 
     // Ignorar mensagens próprias (enviadas pelo bot)
     if (waMessage?.key?.fromMe) {
@@ -1351,15 +1375,22 @@ class WhatsappBaileysInstance {
       return;
     }
 
-    // Se ainda for @lid (Local ID) sem remoteJidAlt, ignorar
-    if (remoteJid.includes("@lid")) {
+    const contactIdentity = await this.resolveContactIdentity(waMessage);
+
+    if (!contactIdentity) {
       logWithDate(
-        `[${this.clientName} - ${this.whatsappNumber}] Ignoring message from @lid (Local ID): ${remoteJid}`,
+        `[${this.clientName} - ${this.whatsappNumber}] Ignoring incoming message ${waMessage.key?.id || "unknown"}: no phone number could be resolved.`,
       );
       return;
     }
 
-    const contactNumber = remoteJid.replace(/@s\.whatsapp\.net/g, "");
+    const { contactNumber, source } = contactIdentity;
+
+    if (source !== "remoteJid") {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Resolved contact number for incoming message ${waMessage.key?.id || "unknown"} via ${source}.`,
+      );
+    }
 
     this.enqueueMessageProcessing(async () => {
       const log = new Log<any>(
@@ -1367,7 +1398,7 @@ class WhatsappBaileysInstance {
         this.clientName,
         "receive-message",
         `${waMessage.key?.id}`,
-        { message: waMessage, remoteJid },
+        { contactIdentitySource: source },
       );
 
       try {
@@ -1388,7 +1419,6 @@ class WhatsappBaileysInstance {
           "viewOnceMessage",
           "viewOnceMessageV2",
         ];
-        const fromNow = this.isMessageFromNow(waMessage);
         const isPhone = validatePhoneStr(contactNumber);
 
         if (!isPhone) {
@@ -1426,7 +1456,7 @@ class WhatsappBaileysInstance {
           );
         }
 
-        if (fromNow && !isBlackListed) {
+        if (!isHistorySync && !isBlackListed) {
           const parsedMessage = await this.parseMessage(waMessage);
           log.setData((data: any) => ({ ...data, parsedMessage }));
 
@@ -1442,13 +1472,8 @@ class WhatsappBaileysInstance {
               parsedMessage,
             )
             .catch((err: any) => {
-              console.log(
-                err.response
-                  ? {
-                      status: err.response.status,
-                      data: err.response.data,
-                    }
-                  : err.message,
+              logWithDate(
+                `[${this.clientName} - ${this.whatsappNumber}] Receive callback failed for message ${parsedMessage.ID}: ${err?.response?.status || err?.code || err?.message || "unknown error"}.`,
               );
             });
 
@@ -2281,7 +2306,7 @@ class WhatsappBaileysInstance {
           if (SYNC_MESSAGE && !SYNC_STATUS) {
             log.setData(() => ({ status: STATUS }));
             await axios
-              .put(`${this.requestURL}/update_message/${message["FROM"]}`, {
+              .put(`${this.requestURL}/update_message/${ID}`, {
                 status: STATUS,
               })
               .then(() => this.updateMessage(ID, { SYNC_STATUS: true }));

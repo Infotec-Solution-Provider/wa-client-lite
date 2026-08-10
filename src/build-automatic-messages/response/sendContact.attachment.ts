@@ -1,5 +1,6 @@
 import WAWebJS from "whatsapp-web.js";
 import WhatsappInstance from "../../whatsapp";
+import getSerializedId from "../../functions/getSerializedId";
 
 async function sendContact(instance: WhatsappInstance, message: WAWebJS.Message, number: string) {
     try {
@@ -7,7 +8,8 @@ async function sendContact(instance: WhatsappInstance, message: WAWebJS.Message,
         const numberId = await instance.client.getNumberId(number);
 
         if (numberId) {
-            const contact = await instance.client.getContactById(numberId?._serialized);
+            const contactId = getSerializedId(numberId);
+            const contact = contactId && await instance.client.getContactById(contactId);
             contact && await message.reply(contact);
         }
     } catch (err) {

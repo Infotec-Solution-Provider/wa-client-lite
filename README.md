@@ -102,7 +102,7 @@ DATABASE_PASSWORD=sua_senha
 DATABASE_DATABASE=wa_client
 
 # URL de callback para o backend
-REQUEST_URL=http://sua-api.com/api/:clientName/whatsapp
+REQUEST_URL=http://sua-api.com/api/:clientName/wwebjs
 
 # Diretório para armazenamento de arquivos
 FILES_DIRECTORY=/path/to/files
