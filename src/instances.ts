@@ -1,5 +1,6 @@
 import { FieldPacket, RowDataPacket } from "mysql2";
 import WhatsappInstance from "./whatsapp";
+import WhatsappBaileysInstance from "./whatsapp-baileys";
 import { DBWhatsappInstance } from "./types";
 import "dotenv/config";
 import whatsappClientPool from "./connection";
@@ -24,7 +25,7 @@ const getURL = (client: string) =>
   REQUEST_URL?.replace(":clientName", client) || "";
 
 // Union type for both instance types
-export type AnyWhatsappInstance = WhatsappInstance;
+export type AnyWhatsappInstance = WhatsappInstance | WhatsappBaileysInstance;
 
 class WhatsappInstances {
   public instances: Array<AnyWhatsappInstance> = [];
