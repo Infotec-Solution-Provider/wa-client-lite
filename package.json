@@ -31,6 +31,7 @@
     "mysql2": "^3.8.0",
     "node-cron": "^3.0.3",
     "nodemon": "^3.1.9",
+    "patch-package": "8.0.1",
     "p-limit": "^6.2.0",
     "pdfkit": "^0.16.0",
     "pino": "^9.6.0",
@@ -48,6 +49,7 @@
     "typescript": "^5.9.3"
   },
   "scripts": {
+    "postinstall": "patch-package",
     "start": "ts-node ./src/app.ts",
     "start:prod": "node ./dist/app.js",
     "start:dev": "nodemon --exec ts-node ./src/app.ts",
