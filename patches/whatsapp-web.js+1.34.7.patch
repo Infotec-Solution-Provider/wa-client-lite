@@ -1,21 +1,22 @@
 diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-index 540078a..ee5ab03 100644
+index 540078a..a05d11c 100644
 --- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
 +++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-@@ -580,9 +580,13 @@ exports.LoadUtils = () => {
+@@ -3,6 +3,17 @@
+ exports.LoadUtils = () => {
+     window.WWebJS = {};
  
-         if (options.waitUntilMsgSent) await sendMsgResultPromise;
- 
--        return window
--            .require('WAWebCollections')
--            .Msg.get(newMsgKey._serialized);
-+        const Msg = window.require('WAWebCollections').Msg;
-+        return (
-+            Msg.get(newMsgKey._serialized) ||
-+            chat.msgs
-+                .getModelsArray()
-+                .find((msg) => msg.id && msg.id.id === newId)
-+        );
-     };
- 
-     window.WWebJS.editMessage = async (msg, content, options = {}) => {
++    // WhatsApp Web renamed MsgKey._serialized to $1 in 2.3000.104xxx.
++    const msgKeyPrototype = window.require('WAWebMsgKey')?.prototype;
++    if (msgKeyPrototype && !('_serialized' in msgKeyPrototype)) {
++        Object.defineProperty(msgKeyPrototype, '_serialized', {
++            get() {
++                return this.$1;
++            },
++            configurable: true,
++        });
++    }
++
+     /**
+      * Helper function that compares between two WWeb versions. Its purpose is to help the developer to choose the correct code implementation depending on the comparison value and the WWeb version.
+      * @param {string} lOperand The left operand for the WWeb version string to compare with
