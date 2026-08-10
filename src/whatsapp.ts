@@ -47,6 +47,63 @@ class WhatsappInstance {
   private contactQueues: Map<string, Array<() => Promise<void>>> = new Map();
   private contactProcessing: Map<string, boolean> = new Map();
 
+  private isWWebJsInjectionUnavailableError(error: unknown): boolean {
+    return (
+      error instanceof Error &&
+      error.message.includes("Cannot read properties of undefined") &&
+      error.message.includes("getChat")
+    );
+  }
+
+  private async waitForWWebJsInjection(): Promise<void> {
+    const page = this.client.pupPage;
+
+    if (!page) {
+      throw new Error("WhatsApp browser page is not available");
+    }
+
+    await page.waitForFunction(
+      () => {
+        const wwebjs = (
+          globalThis as unknown as {
+            WWebJS?: {
+              getChat?: unknown;
+              sendMessage?: unknown;
+            };
+          }
+        ).WWebJS;
+
+        return (
+          typeof wwebjs?.getChat === "function" &&
+          typeof wwebjs?.sendMessage === "function"
+        );
+      },
+      {
+        polling: 250,
+        timeout: 30_000,
+      }
+    );
+  }
+
+  private async sendWithWWebJsInjectionRecovery<T>(
+    send: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await send();
+    } catch (error: unknown) {
+      if (!this.isWWebJsInjectionUnavailableError(error)) {
+        throw error;
+      }
+
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] WWebJS injection unavailable; waiting before retrying send`
+      );
+      await this.waitForWWebJsInjection();
+
+      return await send();
+    }
+  }
+
   constructor(
     clientName: string,
     whatsappNumber: string,
@@ -527,9 +584,11 @@ class WhatsappInstance {
       log.setData((data) => ({ ...data, chatId }));
 
       if (chatId) {
-        const sentMessage = await this.client.sendMessage(chatId, text, {
-          ...(quotedMessageId ? { quotedMessageId, sendSeen: false } : { sendSeen: false }),
-        });
+        const sentMessage = await this.sendWithWWebJsInjectionRecovery(() =>
+          this.client.sendMessage(chatId, text, {
+            ...(quotedMessageId ? { quotedMessageId, sendSeen: false } : { sendSeen: false }),
+          })
+        );
         log.event("sent whatsapp message");
         log.setData((data) => ({ ...data, sentMessage }));
 
@@ -594,12 +653,14 @@ class WhatsappInstance {
 
       const chatId = `${contact}@c.us`;
       const media = new WAWebJS.MessageMedia(mimeType, formatedFile, fileName);
-      const sentMessage = await this.client.sendMessage(chatId, media, {
-        ...(caption ? { caption } : {}),
-        ...(quotedMessageId ? { quotedMessageId } : {}),
-        sendAudioAsVoice: !!isAudio,
-        sendSeen: false
-      });
+      const sentMessage = await this.sendWithWWebJsInjectionRecovery(() =>
+        this.client.sendMessage(chatId, media, {
+          ...(caption ? { caption } : {}),
+          ...(quotedMessageId ? { quotedMessageId } : {}),
+          sendAudioAsVoice: !!isAudio,
+          sendSeen: false
+        })
+      );
       log.setData((data) => ({ ...data, sentMessage }));
 
       if (!sentMessage) {
