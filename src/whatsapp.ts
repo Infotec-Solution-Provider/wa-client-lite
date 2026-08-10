@@ -61,6 +61,7 @@ class WhatsappInstance {
       authStrategy: new LocalAuth({
         clientId: `${clientName}_${whatsappNumber}`,
       }),
+      webVersion: '2.3000.1044810432',
       puppeteer: {
         headless: true,
         ...(process.env["CHROME_BIN"] ? { executablePath: process.env["CHROME_BIN"] } : {}),
