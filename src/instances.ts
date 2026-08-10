@@ -57,6 +57,13 @@ class WhatsappInstances {
             apiUrl,
             connectionParams,
           );
+        case "BAILEYS":
+          return new WhatsappBaileysInstance(
+            i.client_name,
+            i.number,
+            apiUrl,
+            connectionParams,
+          );
         default:
           throw new Error(`Unsupported Whatsapp instance type: ${i.type}`);
       }
