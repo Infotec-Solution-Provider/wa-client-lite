@@ -1,11 +1,8 @@
 diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-index 540078a..a05d11c 100644
+index 540078a..8360884 100644
 --- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
 +++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-@@ -3,6 +3,17 @@
- exports.LoadUtils = () => {
-     window.WWebJS = {};
- 
+@@ -5,0 +6,11 @@ exports.LoadUtils = () => {
 +    // WhatsApp Web renamed MsgKey._serialized to $1 in 2.3000.104xxx.
 +    const msgKeyPrototype = window.require('WAWebMsgKey')?.prototype;
 +    if (msgKeyPrototype && !('_serialized' in msgKeyPrototype)) {
@@ -17,6 +14,15 @@ index 540078a..a05d11c 100644
 +        });
 +    }
 +
-     /**
-      * Helper function that compares between two WWeb versions. Its purpose is to help the developer to choose the correct code implementation depending on the comparison value and the WWeb version.
-      * @param {string} lOperand The left operand for the WWeb version string to compare with
+@@ -836,0 +848,11 @@ exports.LoadUtils = () => {
++        // Prototype accessors do not survive CDP serialization.
++        if (
++            typeof msg.id === 'object' &&
++            msg.id._serialized == null &&
++            typeof msg.id.$1 === 'string'
++        ) {
++            msg.id = Object.assign({}, msg.id, {
++                _serialized: msg.id.$1,
++            });
++        }
++
