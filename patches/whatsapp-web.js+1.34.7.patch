@@ -1,28 +1,199 @@
+diff --git a/node_modules/whatsapp-web.js/src/structures/Base.js b/node_modules/whatsapp-web.js/src/structures/Base.js
+index ed1d83c..a22afdf 100644
+--- a/node_modules/whatsapp-web.js/src/structures/Base.js
++++ b/node_modules/whatsapp-web.js/src/structures/Base.js
+@@ -19,6 +19,20 @@ class Base {
+     _patch(data) {
+         return data;
+     }
++
++    /**
++     * Normalizes a WhatsApp ID object so that `_serialized` is always defined.
++     * WhatsApp Web changed `_serialized` to `$1` in July 2026. This ensures
++     * backward compatibility so all downstream code can continue using `_serialized`.
++     * @param {object} id
++     * @returns {object}
++     */
++    static _normalizeId(id) {
++        if (id && id._serialized == null && id.$1 != null) {
++            return Object.assign({}, id, { _serialized: id.$1 });
++        }
++        return id;
++    }
+ }
+ 
+ module.exports = Base;
+diff --git a/node_modules/whatsapp-web.js/src/structures/Chat.js b/node_modules/whatsapp-web.js/src/structures/Chat.js
+index 40211bf..443a290 100644
+--- a/node_modules/whatsapp-web.js/src/structures/Chat.js
++++ b/node_modules/whatsapp-web.js/src/structures/Chat.js
+@@ -19,7 +19,7 @@ class Chat extends Base {
+          * ID that represents the chat
+          * @type {object}
+          */
+-        this.id = data.id;
++        this.id = Base._normalizeId(data.id);
+ 
+         /**
+          * Title of the chat
+@@ -224,9 +224,20 @@ class Chat extends Base {
+ 
+                 if (searchOptions && searchOptions.limit > 0) {
+                     while (msgs.length < searchOptions.limit) {
+-                        const loadedMessages = await window
+-                            .require('WAWebChatLoadMessages')
+-                            .loadEarlierMsgs({ chat });
++                        let loadedMessages;
++                        try {
++                            loadedMessages = await window
++                                .require('WAWebChatLoadMessages')
++                                .loadEarlierMsgs({ chat, searchOptions });
++                        } catch (e) {
++                            try {
++                                loadedMessages = await window
++                                    .require('WAWebChatLoadMessages')
++                                    .loadEarlierMsgs({ chat });
++                            } catch (e2) {
++                                break;
++                            }
++                        }
+                         if (!loadedMessages || !loadedMessages.length) break;
+                         msgs = [...loadedMessages.filter(msgFilter), ...msgs];
+                     }
+diff --git a/node_modules/whatsapp-web.js/src/structures/Message.js b/node_modules/whatsapp-web.js/src/structures/Message.js
+index dd977e8..db0179b 100644
+--- a/node_modules/whatsapp-web.js/src/structures/Message.js
++++ b/node_modules/whatsapp-web.js/src/structures/Message.js
+@@ -34,7 +34,7 @@ class Message extends Base {
+          * ID that represents the message
+          * @type {object}
+          */
+-        this.id = data.id;
++        this.id = Base._normalizeId(data.id);
+ 
+         /**
+          * ACK status for the message
+@@ -74,7 +74,7 @@ class Message extends Base {
+          */
+         this.from =
+             typeof data.from === 'object' && data.from !== null
+-                ? data.from._serialized
++                ? (data.from._serialized || data.from.$1)
+                 : data.from;
+ 
+         /**
+@@ -86,7 +86,7 @@ class Message extends Base {
+          */
+         this.to =
+             typeof data.to === 'object' && data.to !== null
+-                ? data.to._serialized
++                ? (data.to._serialized || data.to.$1)
+                 : data.to;
+ 
+         /**
+@@ -95,7 +95,7 @@ class Message extends Base {
+          */
+         this.author =
+             typeof data.author === 'object' && data.author !== null
+-                ? data.author._serialized
++                ? (data.author._serialized || data.author.$1)
+                 : data.author;
+ 
+         /**
 diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-index 540078a..8360884 100644
+index 540078a..db76dd8 100644
 --- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
 +++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-@@ -5,0 +6,11 @@ exports.LoadUtils = () => {
-+    // WhatsApp Web renamed MsgKey._serialized to $1 in 2.3000.104xxx.
-+    const msgKeyPrototype = window.require('WAWebMsgKey')?.prototype;
-+    if (msgKeyPrototype && !('_serialized' in msgKeyPrototype)) {
-+        Object.defineProperty(msgKeyPrototype, '_serialized', {
-+            get() {
-+                return this.$1;
-+            },
-+            configurable: true,
-+        });
-+    }
-+
-@@ -836,0 +848,11 @@ exports.LoadUtils = () => {
-+        // Prototype accessors do not survive CDP serialization.
-+        if (
-+            typeof msg.id === 'object' &&
-+            msg.id._serialized == null &&
-+            typeof msg.id.$1 === 'string'
-+        ) {
-+            msg.id = Object.assign({}, msg.id, {
-+                _serialized: msg.id.$1,
-+            });
+@@ -830,49 +830,63 @@ exports.LoadUtils = () => {
+ 
+         if (typeof msg.id.remote === 'object') {
+             msg.id = Object.assign({}, msg.id, {
+-                remote: msg.id.remote._serialized,
++                remote: msg.id.remote._serialized || msg.id.remote.$1,
+             });
+         }
+ 
++        // WhatsApp Web changed _serialized to $1 in July 2026 update
++        if (msg.id && msg.id._serialized == null && msg.id.$1 != null) {
++            msg.id = Object.assign({}, msg.id, { _serialized: msg.id.$1 });
 +        }
 +
+         delete msg.pendingAckUpdate;
+ 
+         return msg;
+     };
+ 
+     window.WWebJS.getChat = async (chatId, { getAsModel = true } = {}) => {
+-        const isChannel = /@\w*newsletter\b/.test(chatId);
+-        const chatWid = window.require('WAWebWidFactory').createWid(chatId);
+-        let chat;
++        try {
++            const isChannel = /@\w*newsletter\b/.test(chatId);
++            const chatWid = window.require('WAWebWidFactory').createWid(chatId);
++            let chat;
+ 
+-        if (isChannel) {
+-            try {
+-                chat = window
+-                    .require('WAWebCollections')
+-                    .WAWebNewsletterCollection.get(chatId);
+-                if (!chat) {
+-                    await window
+-                        .require('WAWebLoadNewsletterPreviewChatAction')
+-                        .loadNewsletterPreviewChat(chatId);
+-                    chat = await window
++            if (isChannel) {
++                try {
++                    chat = window
+                         .require('WAWebCollections')
+-                        .WAWebNewsletterCollection.find(chatWid);
++                        .WAWebNewsletterCollection.get(chatId);
++                    if (!chat) {
++                        await window
++                            .require('WAWebLoadNewsletterPreviewChatAction')
++                            .loadNewsletterPreviewChat(chatId);
++                        chat = await window
++                            .require('WAWebCollections')
++                            .WAWebNewsletterCollection.find(chatWid);
++                    }
++                } catch (ignoredError) {
++                    chat = null;
++                }
++            } else {
++                try {
++                    chat =
++                        window.require('WAWebCollections').Chat.get(chatWid) ||
++                        window.require('WAWebCollections').Chat.getModelsArray().find(c => (c.id._serialized || c.id.$1) === chatId) ||
++                        (
++                            await window
++                                .require('WAWebFindChatAction')
++                                .findOrCreateLatestChat(chatWid)
++                        )?.chat;
++                } catch (ignoredError) {
++                    chat = window.require('WAWebCollections').Chat.getModelsArray().find(c => (c.id._serialized || c.id.$1) === chatId) || null;
+                 }
+-            } catch (ignoredError) {
+-                chat = null;
+             }
+-        } else {
+-            chat =
+-                window.require('WAWebCollections').Chat.get(chatWid) ||
+-                (
+-                    await window
+-                        .require('WAWebFindChatAction')
+-                        .findOrCreateLatestChat(chatWid)
+-                )?.chat;
+-        }
+ 
+-        return getAsModel && chat
+-            ? await window.WWebJS.getChatModel(chat, { isChannel: isChannel })
+-            : chat;
++            return getAsModel && chat
++                ? await window.WWebJS.getChatModel(chat, { isChannel: isChannel })
++                : chat;
++        } catch (err) {
++            return null;
++        }
+     };
+ 
+     window.WWebJS.getChannelMetadata = async (inviteCode) => {
