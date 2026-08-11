@@ -22,7 +22,7 @@ O **WA Client Lite** é um serviço que gerencia múltiplas instâncias de Whats
 - Envio de arquivos (imagens, documentos, áudios, vídeos)
 - Mensagens automáticas configuráveis
 - Sincronização de mensagens com servidor backend
-- Carregamento de avatares e contatos
+- Carregamento manual de avatares e contatos
 - Suporte a múltiplos clientes com bancos de dados separados
 
 ## 🛠 Tecnologias
@@ -108,7 +108,6 @@ REQUEST_URL=http://sua-api.com/api/:clientName/wwebjs
 FILES_DIRECTORY=/path/to/files
 
 # Agendamentos (opcional - formato CRON)
-CRON_LOAD_AVATARS=0 */4 * * *
 CRON_SYNC_MESSAGES=*/2 * * * *
 
 # Chrome (para WWEBJS - opcional)
@@ -130,7 +129,6 @@ USE_LOCAL_DATE=true
 | `DATABASE_DATABASE` | ✅ | Nome do banco de dados principal |
 | `REQUEST_URL` | ✅ | URL do backend (use `:clientName` como placeholder) |
 | `FILES_DIRECTORY` | ✅ | Diretório para arquivos de mídia |
-| `CRON_LOAD_AVATARS` | ❌ | Cron para carregar avatares (padrão: `0 */4 * * *`) |
 | `CRON_SYNC_MESSAGES` | ❌ | Cron para sincronizar mensagens (padrão: `*/2 * * * *`) |
 | `CHROME_BIN` | ❌ | Caminho do executável Chrome (WWEBJS) |
 | `CHROME_WS` | ❌ | WebSocket do Chrome remoto (WWEBJS) |

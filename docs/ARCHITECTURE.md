@@ -319,7 +319,6 @@ O sistema utiliza node-cron para tarefas recorrentes:
 
 | Tarefa | Cron Padrão | Descrição |
 |--------|-------------|-----------|
-| Load Avatars | `0 */4 * * *` | A cada 4 horas |
 | Sync Messages | `*/2 * * * *` | A cada 2 minutos |
 
 ---

@@ -96,20 +96,6 @@ class WhatsappBaileysInstance {
     this.connectionParams = connection;
     this.historyMinDate = this.buildHistoryMinDate();
 
-    schedule(process.env["CRON_LOAD_AVATARS"] || "0 */4 * * *", async () => {
-      try {
-        await this.loadAvatars();
-        logWithDate(
-          `[${this.clientName} - ${this.whatsappNumber}] Avatars loaded successfully.`,
-        );
-      } catch (err: any) {
-        logWithDate(
-          `[${this.clientName} - ${this.whatsappNumber}] Avatars loading failure =>`,
-          err,
-        );
-      }
-    });
-
     schedule(process.env["CRON_SYNC_MESSAGES"] || "*/2 * * * *", () =>
       this.syncMessagesWithServer(),
     );
