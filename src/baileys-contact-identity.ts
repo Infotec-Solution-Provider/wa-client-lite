@@ -7,6 +7,10 @@ import {
   jidDecode,
   type WAMessageKey,
 } from "baileys";
+import {
+  createWhatsappContactIdentity,
+  type WhatsappContactIdentity,
+} from "./contact-identity";
 
 export type BaileysContactIdentitySource =
   | "remoteJid"
@@ -14,7 +18,7 @@ export type BaileysContactIdentitySource =
   | "lid-mapping";
 
 export interface BaileysContactIdentity {
-  contactNumber: string | null;
+  contact: WhatsappContactIdentity;
   lidJid: string | null;
   primaryJid: string;
   source: Exclude<BaileysContactIdentitySource, "lid-mapping"> | null;
@@ -43,7 +47,10 @@ export function resolveBaileysContactIdentity(
 
     if (contactNumber) {
       return {
-        contactNumber,
+        contact: createWhatsappContactIdentity(
+          isLidJid(primaryJid) ? primaryJid : contactNumber,
+          contactNumber,
+        ),
         lidJid: null,
         primaryJid,
         source: candidate.source,
@@ -56,7 +63,7 @@ export function resolveBaileysContactIdentity(
   )?.jid;
 
   return {
-    contactNumber: null,
+    contact: createWhatsappContactIdentity(primaryJid),
     lidJid: lidJid || null,
     primaryJid,
     source: null,

@@ -56,7 +56,8 @@ async function processChat(pool: Pool, instance: WhatsappInstance, chats: WAWebJ
 
 async function processContactMessages(pool: Pool, chat: WAWebJS.Chat, contact: WAWebJS.Contact) {
     try {
-        const CODIGO_NUMERO = await getNumberErpId(pool, contact.id.user, contact.name);
+        const contactIdentifier = getSerializedId(contact.id) || contact.id.user;
+        const CODIGO_NUMERO = await getNumberErpId(pool, contactIdentifier, contact.name);
         const blocked_types = ["e2e_notification", "notification_template", "call_log", "gp2"];
         const messages = (await chat.fetchMessages({ limit: Infinity })).filter(m => !blocked_types.includes(m.type));
 

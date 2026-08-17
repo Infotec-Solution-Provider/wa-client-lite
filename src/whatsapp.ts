@@ -24,6 +24,14 @@ import { schedule } from "node-cron";
 import runAutoMessage from "./build-automatic-messages";
 import Log from "./log";
 import whatsappClientPool from "./connection";
+import {
+  createWhatsappContactIdentity,
+  toWwebjsChatId,
+} from "./contact-identity";
+import {
+  ensureContactIdentitySchema,
+  ensureMessageIdentitySchema,
+} from "./contact-identity-migration";
 
 class WhatsappInstance {
   public readonly requestURL: string;
@@ -157,9 +165,8 @@ class WhatsappInstance {
     this.buildBlockedNumbers();
     this.buildAutomaticMessages();
     this.buildClient();
-    this.initialize();
-
     this.pool = createPool(this.connectionParams);
+    this.initialize();
   }
 
   private async processContactQueue(contactNumber: string, type: string) {
@@ -317,6 +324,17 @@ class WhatsappInstance {
 
   public async initialize() {
     try {
+      await ensureMessageIdentitySchema(whatsappClientPool);
+      await ensureContactIdentitySchema(this.pool);
+    } catch (err) {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Contact identity schema migration failed; session startup aborted.`,
+        err,
+      );
+      return;
+    }
+
+    try {
       await axios.put(`${this.requestURL}/init/${this.whatsappNumber}`);
       logWithDate(
         `[${this.clientName} - ${this.whatsappNumber}] Init success!`
@@ -362,12 +380,10 @@ class WhatsappInstance {
           "gp2",
         ];
         const fromNow = isMessageFromNow(message);
-        const phone = message.from;
-        const isGroup = phone.includes("@g.us");
+        const isGroup = message.from.includes("@g.us");
 
-        // Se a mensagem vem de um @lid (Local ID), tentar obter o número real
-        let contactNumber: string;
-        if (message.from.includes("@lid")) {
+        let contactIdentity = createWhatsappContactIdentity(message.from);
+        if (contactIdentity.TIPO_IDENTIFICADOR === "LID") {
           logWithDate(
             `[${this.clientName} - ${this.whatsappNumber}] Processing message for ${message.from}...`
           );
@@ -377,57 +393,60 @@ class WhatsappInstance {
 
             // Verificar se conseguimos o número real
             if (numberId && numberId.includes("@c.us")) {
-              contactNumber = numberId.replace(/@c\.us/g, "");
+              contactIdentity = createWhatsappContactIdentity(
+                message.from,
+                numberId.replace(/@c\.us$/, ""),
+              );
               logWithDate(
-                `[${this.clientName} - ${this.whatsappNumber}] Resolved @lid to number: ${contactNumber}`
+                `[${this.clientName} - ${this.whatsappNumber}] Resolved @lid to number: ${contactIdentity.NUMERO}`
               );
             } else {
               logWithDate(
-                `[${this.clientName} - ${this.whatsappNumber}] Could not resolve @lid to valid number, skipping message`
+                `[${this.clientName} - ${this.whatsappNumber}] Could not resolve @lid to a phone number; using the LID identifier.`
               );
-              return;
             }
           } catch (err) {
             logWithDate(
               `[${this.clientName} - ${this.whatsappNumber}] Error resolving @lid:`,
               err
             );
-            return;
           }
-        } else {
-          contactNumber = message.from
-            .replace(/@c\.us/g, "")
-            .replace(/@g\.us/g, "");
         }
 
-        const isPhone = validatePhoneStr(contactNumber);
+        const contactIdentifier = contactIdentity.IDENTIFICADOR;
 
-        if (!isPhone || isGroup) {
+        if (
+          isGroup ||
+          (contactIdentity.NUMERO && !validatePhoneStr(contactIdentity.NUMERO))
+        ) {
           return;
         }
 
         const isStatus = message.isStatus;
         const isBlackListedType = blockedTypes.includes(message.type);
         const isBlackListedContact =
-          this.blockedNumbers.includes(contactNumber);
+          this.blockedNumbers.includes(
+            contactIdentity.NUMERO || contactIdentifier,
+          );
         const isBlackListed = isBlackListedType || isBlackListedContact;
 
         for (const autoMessage of this.autoMessages) {
-          await runAutoMessage(this, autoMessage, message, contactNumber);
+          await runAutoMessage(this, autoMessage, message, contactIdentifier);
         }
 
         if (!isGroup && fromNow && !isBlackListed && !isStatus) {
-          const parsedMessage = await parseMessage(message);
+          const parsedMessage: ParsedMessage | null = await parseMessage(message);
           log.setData((data) => ({ ...data, parsedMessage }));
 
           if (!parsedMessage) {
             throw new Error("Parse message failure");
           }
-          await this.saveMessage(parsedMessage, contactNumber);
+          parsedMessage.CONTATO = contactIdentity;
+          await this.saveMessage(parsedMessage, contactIdentifier);
 
           await axios
             .post(
-              `${this.requestURL}/receive_message/${this.whatsappNumber}/${contactNumber}`,
+              `${this.requestURL}/receive_message/${this.whatsappNumber}/${encodeURIComponent(contactIdentifier)}`,
               parsedMessage
             )
             .catch((err: any) => {
@@ -578,8 +597,13 @@ class WhatsappInstance {
     try {
       log.event("started sendText function");
 
-      const numberId = await this.client.getNumberId(contact);
-      const chatId = getSerializedId(numberId);
+      const identity = createWhatsappContactIdentity(contact);
+      const numberId = identity.NUMERO
+        ? await this.client.getNumberId(identity.NUMERO)
+        : null;
+      const chatId = identity.NUMERO
+        ? getSerializedId(numberId)
+        : toWwebjsChatId(identity.IDENTIFICADOR);
       log.event("fetched contact's whatsapp id");
       log.setData((data) => ({ ...data, chatId }));
 
@@ -651,7 +675,7 @@ class WhatsappInstance {
         );
       }
 
-      const chatId = `${contact}@c.us`;
+      const chatId = toWwebjsChatId(contact);
       const media = new WAWebJS.MessageMedia(mimeType, formatedFile, fileName);
       const sentMessage = await this.sendWithWWebJsInjectionRecovery(() =>
         this.client.sendMessage(chatId, media, {
@@ -736,10 +760,10 @@ class WhatsappInstance {
                 ct.NOME
             FROM w_clientes_numeros ct
             LEFT JOIN clientes cli ON cli.CODIGO = ct.CODIGO_CLIENTE
-            WHERE ct.NUMERO = ?
+            WHERE ct.IDENTIFICADOR = ? OR ct.NUMERO = ?
             `;
 
-      const [rows] = await this.pool.query(SELECT_QUERY, [number]);
+      const [rows] = await this.pool.query(SELECT_QUERY, [number, number]);
       const findContact = (
         rows as Array<{ RAZAO: string; CNPJ: string; NOME: string }>
       )[0];
@@ -880,8 +904,11 @@ class WhatsappInstance {
 
             await axios
               .post(
-                `${this.requestURL}/receive_message/${this.whatsappNumber}/${message["FROM"]}`,
-                parsedMessage
+                `${this.requestURL}/receive_message/${this.whatsappNumber}/${encodeURIComponent(message["FROM"])}`,
+                {
+                  ...parsedMessage,
+                  CONTATO: createWhatsappContactIdentity(message["FROM"]),
+                }
               )
               .then(() =>
                 this.updateMessage(ID, {

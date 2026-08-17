@@ -1,3 +1,5 @@
+import type { WhatsappContactIdentity } from "./contact-identity";
+
 export interface SendFileOptions {
     contact: string;
     file: any;
@@ -44,6 +46,7 @@ export interface ParsedMessage {
     FROM_ME: boolean;
     DATA_HORA: Date;
     STATUS: string;
+    CONTATO?: WhatsappContactIdentity;
     ARQUIVO: null | {
         NOME_ARQUIVO: string;
         TIPO: string;

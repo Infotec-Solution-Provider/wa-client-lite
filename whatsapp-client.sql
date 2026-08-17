@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS `messages` (
   `SYNC_MESSAGE` tinyint(1) NOT NULL DEFAULT '0',
   `SYNC_STATUS` tinyint(1) NOT NULL DEFAULT '0',
   `INSTANCE` varchar(100) COLLATE utf8_unicode_ci NOT NULL,
-  `FROM` varchar(20) COLLATE utf8_unicode_ci NOT NULL,
+  `FROM` varchar(191) COLLATE utf8_unicode_ci NOT NULL,
   PRIMARY KEY (`ID`),
   KEY `idx_instance` (`INSTANCE`),
   KEY `idx_sync` (`SYNC_MESSAGE`,`SYNC_STATUS`),

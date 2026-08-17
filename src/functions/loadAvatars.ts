@@ -42,7 +42,7 @@ async function loadAvatars(instance: WhatsappInstance) {
 
 async function getRunningAttendances(pool: Pool) {
     try {
-        const SELECT_QUERY = "SELECT wa.*, ct.NUMERO AS CONTATO_NUMERO FROM w_atendimentos wa LEFT JOIN w_clientes_numeros ct ON ct.CODIGO = wa.CODIGO_NUMERO WHERE wa.CONCLUIDO = 0;";
+        const SELECT_QUERY = "SELECT wa.*, COALESCE(ct.NUMERO, ct.IDENTIFICADOR) AS CONTATO_NUMERO FROM w_atendimentos wa LEFT JOIN w_clientes_numeros ct ON ct.CODIGO = wa.CODIGO_NUMERO WHERE wa.CONCLUIDO = 0;";
 
         const [results]: [RowDataPacket[], FieldPacket[]] = await pool.query(SELECT_QUERY);
 

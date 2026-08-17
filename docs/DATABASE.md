@@ -237,7 +237,7 @@ CREATE TABLE IF NOT EXISTS `messages` (
   `SYNC_MESSAGE` tinyint(1) NOT NULL DEFAULT '0',
   `SYNC_STATUS` tinyint(1) NOT NULL DEFAULT '0',
   `INSTANCE` varchar(100) NOT NULL,
-  `FROM` varchar(20) NOT NULL,
+  `FROM` varchar(191) NOT NULL,
   PRIMARY KEY (`ID`),
   KEY `idx_instance` (`INSTANCE`),
   KEY `idx_sync` (`SYNC_MESSAGE`,`SYNC_STATUS`),
@@ -262,7 +262,7 @@ CREATE TABLE IF NOT EXISTS `messages` (
 | `SYNC_MESSAGE` | tinyint | Se mensagem foi sincronizada |
 | `SYNC_STATUS` | tinyint | Se status foi sincronizado |
 | `INSTANCE` | varchar(100) | Número da instância |
-| `FROM` | varchar(20) | Número do remetente |
+| `FROM` | varchar(191) | Identificador roteável do remetente |
 
 #### Status de Mensagem
 

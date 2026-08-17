@@ -34,6 +34,15 @@ import {
   getPhoneNumberFromBaileysJid,
   resolveBaileysContactIdentity,
 } from "./baileys-contact-identity";
+import {
+  createWhatsappContactIdentity,
+  toBaileysJid,
+  type WhatsappContactIdentity,
+} from "./contact-identity";
+import {
+  ensureContactIdentitySchema,
+  ensureMessageIdentitySchema,
+} from "./contact-identity-migration";
 import runAutoMessage from "./build-automatic-messages";
 import whatsappClientPool from "./connection";
 import loadAvatars from "./functions/loadAvatars";
@@ -214,7 +223,7 @@ class WhatsappBaileysInstance {
   private async resolveContactIdentity(
     waMessage: proto.IWebMessageInfo,
   ): Promise<{
-    contactNumber: string;
+    contact: WhatsappContactIdentity;
     source: BaileysContactIdentitySource;
   } | null> {
     const key = waMessage.key as WAMessageKey | undefined;
@@ -224,15 +233,15 @@ class WhatsappBaileysInstance {
       return null;
     }
 
-    if (identity.contactNumber && identity.source) {
+    if (identity.contact.NUMERO && identity.source) {
       return {
-        contactNumber: identity.contactNumber,
+        contact: identity.contact,
         source: identity.source,
       };
     }
 
     if (!identity.lidJid || !this.client) {
-      return null;
+      return { contact: identity.contact, source: "remoteJid" };
     }
 
     try {
@@ -242,15 +251,21 @@ class WhatsappBaileysInstance {
       const contactNumber = getPhoneNumberFromBaileysJid(mappedJid);
 
       if (!contactNumber) {
-        return null;
+        return { contact: identity.contact, source: "remoteJid" };
       }
 
-      return { contactNumber, source: "lid-mapping" };
+      return {
+        contact: createWhatsappContactIdentity(
+          identity.contact.IDENTIFICADOR,
+          contactNumber,
+        ),
+        source: "lid-mapping",
+      };
     } catch {
       logWithDate(
         `[${this.clientName} - ${this.whatsappNumber}] Failed to resolve LID mapping for incoming message ${waMessage.key?.id || "unknown"}.`,
       );
-      return null;
+      return { contact: identity.contact, source: "remoteJid" };
     }
   }
 
@@ -303,6 +318,17 @@ class WhatsappBaileysInstance {
   }
 
   public async initialize() {
+    try {
+      await ensureMessageIdentitySchema(whatsappClientPool);
+      await ensureContactIdentitySchema(this.pool);
+    } catch (err) {
+      logWithDate(
+        `[${this.clientName} - ${this.whatsappNumber}] Contact identity schema migration failed; session startup aborted.`,
+        err,
+      );
+      return;
+    }
+
     try {
       await axios.put(`${this.requestURL}/init/${this.whatsappNumber}`);
       logWithDate(
@@ -900,10 +926,9 @@ class WhatsappBaileysInstance {
           continue;
         }
 
-        const { contactNumber } = contactIdentity;
+        const { contact } = contactIdentity;
 
-        // Validar se é um número de telefone válido
-        if (!validatePhoneStr(contactNumber)) {
+        if (contact.NUMERO && !validatePhoneStr(contact.NUMERO)) {
           skipped++;
           continue;
         }
@@ -924,7 +949,8 @@ class WhatsappBaileysInstance {
         }
 
         // Salvar mensagem no banco
-        await this.saveHistoryMessage(parsedMessage, contactNumber);
+        parsedMessage.CONTATO = contact;
+        await this.saveHistoryMessage(parsedMessage, contact);
         saved++;
       } catch (err) {
         errors++;
@@ -1010,7 +1036,10 @@ class WhatsappBaileysInstance {
    * Salva mensagem do histórico diretamente no banco do ERP (w_mensagens)
    * Isso evita que as mensagens do histórico abram novos atendimentos
    */
-  private async saveHistoryMessage(message: ParsedMessage, from: string) {
+  private async saveHistoryMessage(
+    message: ParsedMessage,
+    contact: WhatsappContactIdentity,
+  ) {
     message = encodeParsedMessage(message);
 
     try {
@@ -1018,7 +1047,10 @@ class WhatsappBaileysInstance {
       const [numeroRows] = await this.pool
         .query<
           RowDataPacket[]
-        >("SELECT CODIGO FROM w_clientes_numeros WHERE NUMERO = ? LIMIT 1", [from])
+        >(
+          "SELECT CODIGO FROM w_clientes_numeros WHERE IDENTIFICADOR = ? OR (NUMERO IS NOT NULL AND NUMERO = ?) LIMIT 1",
+          [contact.IDENTIFICADOR, contact.NUMERO],
+        )
         .catch(() => [[] as RowDataPacket[]]);
 
       let codigoNumero: number | null = null;
@@ -1027,14 +1059,17 @@ class WhatsappBaileysInstance {
         codigoNumero = numeroRows[0]["CODIGO"];
       } else {
         // Se o número não existe, criar o contato primeiro
-        const contactData = { id: `${from}@s.whatsapp.net` };
+        const contactData = { id: contact.IDENTIFICADOR, identity: contact };
         await this.saveContactToDatabase(contactData);
 
         // Buscar novamente
         const [newRows] = await this.pool
           .query<
             RowDataPacket[]
-          >("SELECT CODIGO FROM w_clientes_numeros WHERE NUMERO = ? LIMIT 1", [from])
+          >(
+            "SELECT CODIGO FROM w_clientes_numeros WHERE IDENTIFICADOR = ? OR (NUMERO IS NOT NULL AND NUMERO = ?) LIMIT 1",
+            [contact.IDENTIFICADOR, contact.NUMERO],
+          )
           .catch(() => [[] as RowDataPacket[]]);
 
         if (newRows[0]) {
@@ -1137,7 +1172,7 @@ class WhatsappBaileysInstance {
         1, // SYNC_MESSAGE - já sincronizado (salvo diretamente no ERP)
         1, // SYNC_STATUS - já sincronizado
         `${this.clientName}_${this.whatsappNumber}`,
-        from,
+        contact.IDENTIFICADOR,
       ];
 
       await whatsappClientPool.query(localQuery, localParams);
@@ -1384,11 +1419,12 @@ class WhatsappBaileysInstance {
       return;
     }
 
-    const { contactNumber, source } = contactIdentity;
+    const { contact, source } = contactIdentity;
+    const contactIdentifier = contact.IDENTIFICADOR;
 
     if (source !== "remoteJid") {
       logWithDate(
-        `[${this.clientName} - ${this.whatsappNumber}] Resolved contact number for incoming message ${waMessage.key?.id || "unknown"} via ${source}.`,
+        `[${this.clientName} - ${this.whatsappNumber}] Resolved contact identity for incoming message ${waMessage.key?.id || "unknown"} via ${source}.`,
       );
     }
 
@@ -1419,9 +1455,7 @@ class WhatsappBaileysInstance {
           "viewOnceMessage",
           "viewOnceMessageV2",
         ];
-        const isPhone = validatePhoneStr(contactNumber);
-
-        if (!isPhone) {
+        if (contact.NUMERO && !validatePhoneStr(contact.NUMERO)) {
           return;
         }
 
@@ -1431,7 +1465,7 @@ class WhatsappBaileysInstance {
         const messageType = this.getMessageType(message);
         const isBlackListedType = blockedTypes.includes(messageType);
         const isBlackListedContact =
-          this.blockedNumbers.includes(contactNumber);
+          this.blockedNumbers.includes(contact.NUMERO || contactIdentifier);
         const isBlackListed = isBlackListedType || isBlackListedContact;
 
         if (isHistorySync && !isBlackListed) {
@@ -1442,7 +1476,8 @@ class WhatsappBaileysInstance {
             return;
           }
 
-          await this.saveHistoryMessage(parsedHistoryMessage, contactNumber);
+          parsedHistoryMessage.CONTATO = contact;
+          await this.saveHistoryMessage(parsedHistoryMessage, contact);
           return;
         }
 
@@ -1452,7 +1487,7 @@ class WhatsappBaileysInstance {
             this as any,
             autoMessage,
             waMessage as any,
-            contactNumber,
+            contactIdentifier,
           );
         }
 
@@ -1464,11 +1499,12 @@ class WhatsappBaileysInstance {
             throw new Error("Parse message failure");
           }
 
-          await this.saveMessage(parsedMessage, contactNumber);
+          parsedMessage.CONTATO = contact;
+          await this.saveMessage(parsedMessage, contactIdentifier);
 
           await axios
             .post(
-              `${this.requestURL}/receive_message/${this.whatsappNumber}/${contactNumber}`,
+              `${this.requestURL}/receive_message/${this.whatsappNumber}/${encodeURIComponent(contactIdentifier)}`,
               parsedMessage,
             )
             .catch((err: any) => {
@@ -1503,7 +1539,7 @@ class WhatsappBaileysInstance {
           err.response ? err.response.data : err,
         );
       }
-    }, contactNumber);
+    }, contactIdentifier);
   }
 
   public async onReceiveMessageStatus(key: WAMessageKey, status: number) {
@@ -1587,120 +1623,98 @@ class WhatsappBaileysInstance {
     id: string;
     name?: string;
     notify?: string;
+    identity?: WhatsappContactIdentity;
   }): Promise<boolean> {
     try {
-      // Validar se é um contato válido (não grupo, não status, não broadcast, não lid)
       if (!contact.id) {
         return false;
       }
 
-      // Ignorar grupos (@g.us), status, broadcast e LID
       if (
         contact.id.includes("@g.us") ||
         contact.id.includes("@broadcast") ||
-        contact.id.includes("@lid") ||
         contact.id === "status@broadcast" ||
         contact.id === "0@s.whatsapp.net"
       ) {
         return false;
       }
 
-      // Extrair número do JID (formato: 5511999999999@s.whatsapp.net)
-      const number = contact.id.replace(/@s\.whatsapp\.net/g, "");
-
-      // Validar se é um número válido (apenas dígitos e tamanho mínimo)
-      if (!number || number.length < 10 || !/^\d+$/.test(number)) {
-        return false;
-      }
-
-      // Nome do contato (prioridade: name > notify > null)
+      const identity =
+        contact.identity || createWhatsappContactIdentity(contact.id);
+      const number = identity.NUMERO;
       const contactName = contact.name || contact.notify || null;
-
-      // Extrair DDD e corpo do número para buscar cliente
-      const numberWithoutCountry =
-        number.length > 11 ? number.slice(2) : number;
-      const DDD = numberWithoutCountry.slice(0, 2);
-      const numberBody =
-        numberWithoutCountry.length === 10
-          ? numberWithoutCountry.slice(2)
-          : numberWithoutCountry.slice(3);
-
-      const numberWithout9 = numberBody;
-      const numberWith9 =
-        numberBody.length === 8 ? `9${numberBody}` : numberBody;
-
-      // Buscar cliente associado ao número
-      const SEARCH_CUSTOMER_QUERY = `
-        SELECT CODIGO FROM clientes
-        WHERE (AREA1 = ? AND FONE1 = ?) OR 
-              (AREA2 = ? AND FONE2 = ?) OR 
-              (AREA3 = ? AND FONE3 = ?) OR 
-              (AREA1 = ? AND FONE1 = ?) OR 
-              (AREA2 = ? AND FONE2 = ?) OR 
-              (AREA3 = ? AND FONE3 = ?)
-        LIMIT 1
-      `;
-
-      const SEARCH_CONTACT_QUERY = `
-        SELECT CODIGO_CLIENTE, NOME FROM contatos
-        WHERE (AREA_CEL = ? AND CELULAR = ?) OR 
-              (AREA_CEL = ? AND CELULAR = ?) OR
-              (AREA_DIRETO = ? AND FONE_DIRETO = ?) OR 
-              (AREA_DIRETO = ? AND FONE_DIRETO = ?) OR  
-              (AREA_RESI = ? AND FONE_RESIDENCIAL = ?) OR 
-              (AREA_RESI = ? AND FONE_RESIDENCIAL = ?)
-        LIMIT 1
-      `;
-
-      const searchParams = [
-        DDD,
-        numberWith9,
-        DDD,
-        numberWith9,
-        DDD,
-        numberWith9,
-        DDD,
-        numberWithout9,
-        DDD,
-        numberWithout9,
-        DDD,
-        numberWithout9,
-      ];
-
       let customerCode: number = -1;
       let dbContactName: string | null = null;
 
-      // Buscar na tabela clientes
-      const [customerRows] = await this.pool
-        .query<RowDataPacket[]>(SEARCH_CUSTOMER_QUERY, searchParams)
-        .catch(() => [[] as RowDataPacket[]]);
-
-      if (customerRows[0]) {
-        customerCode = customerRows[0]["CODIGO"];
-      } else {
-        // Buscar na tabela contatos
-        const [contactRows] = await this.pool
-          .query<RowDataPacket[]>(SEARCH_CONTACT_QUERY, searchParams)
+      if (number) {
+        const numberWithoutCountry =
+          number.length > 11 ? number.slice(2) : number;
+        const DDD = numberWithoutCountry.slice(0, 2);
+        const numberBody =
+          numberWithoutCountry.length === 10
+            ? numberWithoutCountry.slice(2)
+            : numberWithoutCountry.slice(3);
+        const numberWithout9 = numberBody;
+        const numberWith9 =
+          numberBody.length === 8 ? `9${numberBody}` : numberBody;
+        const searchParams = [
+          DDD, numberWith9, DDD, numberWith9, DDD, numberWith9,
+          DDD, numberWithout9, DDD, numberWithout9, DDD, numberWithout9,
+        ];
+        const [customerRows] = await this.pool
+          .query<RowDataPacket[]>(
+            `SELECT CODIGO FROM clientes
+             WHERE (AREA1 = ? AND FONE1 = ?) OR (AREA2 = ? AND FONE2 = ?) OR
+                   (AREA3 = ? AND FONE3 = ?) OR (AREA1 = ? AND FONE1 = ?) OR
+                   (AREA2 = ? AND FONE2 = ?) OR (AREA3 = ? AND FONE3 = ?)
+             LIMIT 1`,
+            searchParams,
+          )
           .catch(() => [[] as RowDataPacket[]]);
 
-        if (contactRows[0]) {
-          customerCode = contactRows[0]["CODIGO_CLIENTE"] || -1;
-          dbContactName = contactRows[0]["NOME"] || null;
+        if (customerRows[0]) {
+          customerCode = customerRows[0]["CODIGO"];
+        } else {
+          const [contactRows] = await this.pool
+            .query<RowDataPacket[]>(
+              `SELECT CODIGO_CLIENTE, NOME FROM contatos
+               WHERE (AREA_CEL = ? AND CELULAR = ?) OR (AREA_CEL = ? AND CELULAR = ?) OR
+                     (AREA_DIRETO = ? AND FONE_DIRETO = ?) OR (AREA_DIRETO = ? AND FONE_DIRETO = ?) OR
+                     (AREA_RESI = ? AND FONE_RESIDENCIAL = ?) OR (AREA_RESI = ? AND FONE_RESIDENCIAL = ?)
+               LIMIT 1`,
+              searchParams,
+            )
+            .catch(() => [[] as RowDataPacket[]]);
+
+          if (contactRows[0]) {
+            customerCode = contactRows[0]["CODIGO_CLIENTE"] || -1;
+            dbContactName = contactRows[0]["NOME"] || null;
+          }
         }
       }
 
-      // Nome final: prioridade banco de dados > contato do celular > número
-      const finalName = dbContactName || contactName || number;
+      const finalName =
+        dbContactName || contactName || number || identity.IDENTIFICADOR;
 
-      // Inserir ou atualizar na tabela w_clientes_numeros
-      // Só atualiza o nome se vier do banco (dbContactName)
       await this.pool.query(
-        `INSERT INTO w_clientes_numeros (CODIGO_CLIENTE, NOME, NUMERO) 
-         VALUES (?, ?, ?)
+        `INSERT INTO w_clientes_numeros
+           (CODIGO_CLIENTE, NOME, NUMERO, IDENTIFICADOR, TIPO_IDENTIFICADOR)
+         VALUES (?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE 
            CODIGO_CLIENTE = IF(VALUES(CODIGO_CLIENTE) != -1, VALUES(CODIGO_CLIENTE), CODIGO_CLIENTE),
+           NUMERO = COALESCE(VALUES(NUMERO), NUMERO),
+           IDENTIFICADOR = VALUES(IDENTIFICADOR),
+           TIPO_IDENTIFICADOR = VALUES(TIPO_IDENTIFICADOR),
            NOME = IF(? IS NOT NULL, ?, NOME)`,
-        [customerCode, finalName, number, dbContactName, dbContactName],
+        [
+          customerCode,
+          finalName,
+          number,
+          identity.IDENTIFICADOR,
+          identity.TIPO_IDENTIFICADOR,
+          dbContactName,
+          dbContactName,
+        ],
       );
 
       return true;
@@ -1915,11 +1929,14 @@ class WhatsappBaileysInstance {
 
       log.event("started sendText function");
 
-      const jid = `${contact}@s.whatsapp.net`;
-      const results = await this.client.onWhatsApp(jid);
+      const identity = createWhatsappContactIdentity(contact);
+      const jid = toBaileysJid(identity.IDENTIFICADOR);
+      const results = identity.NUMERO
+        ? await this.client.onWhatsApp(jid)
+        : undefined;
       const result = results?.[0];
 
-      if (!result?.exists) {
+      if (identity.NUMERO && !result?.exists) {
         logWithDate(
           `[${this.clientName} - ${this.whatsappNumber}] Number not on WhatsApp: ${contact}`,
         );
@@ -2000,7 +2017,7 @@ class WhatsappBaileysInstance {
         isAudio,
       } = options;
 
-      const jid = `${contact}@s.whatsapp.net`;
+      const jid = toBaileysJid(contact);
       let mediaBuffer: Buffer = file;
 
       if (isAudio === "true") {
@@ -2134,10 +2151,10 @@ class WhatsappBaileysInstance {
           ct.NOME
         FROM w_clientes_numeros ct
         LEFT JOIN clientes cli ON cli.CODIGO = ct.CODIGO_CLIENTE
-        WHERE ct.NUMERO = ?
+        WHERE ct.IDENTIFICADOR = ? OR ct.NUMERO = ?
       `;
 
-      const [rows] = await this.pool.query(SELECT_QUERY, [number]);
+      const [rows] = await this.pool.query(SELECT_QUERY, [number, number]);
       const findContact = (
         rows as Array<{ RAZAO: string; CNPJ: string; NOME: string }>
       )[0];
@@ -2291,8 +2308,11 @@ class WhatsappBaileysInstance {
 
             await axios
               .post(
-                `${this.requestURL}/receive_message/${this.whatsappNumber}/${message["FROM"]}`,
-                parsedMessage,
+                `${this.requestURL}/receive_message/${this.whatsappNumber}/${encodeURIComponent(message["FROM"])}`,
+                {
+                  ...parsedMessage,
+                  CONTATO: createWhatsappContactIdentity(message["FROM"]),
+                },
               )
               .then(() =>
                 this.updateMessage(ID, {

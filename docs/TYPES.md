@@ -92,6 +92,11 @@ interface ParsedMessage {
     FROM_ME: boolean;           // Se foi enviada pelo sistema
     DATA_HORA: Date;            // Data/hora
     STATUS: string;             // Status (PENDING, SENT, READ, etc)
+    CONTATO?: {
+        IDENTIFICADOR: string;  // Endereço canônico e roteável no WhatsApp
+        TIPO_IDENTIFICADOR: 'PHONE' | 'LID' | 'USERNAME';
+        NUMERO: string | null;  // Telefone, quando disponibilizado pelo WhatsApp
+    };
     ARQUIVO: null | {
         NOME_ARQUIVO: string;   // Nome salvo do arquivo
         TIPO: string;           // MIME type
@@ -139,7 +144,7 @@ Atendimento com dados do contato.
 
 ```typescript
 interface AttendanceWithContact extends Attendance {
-    CONTATO_NUMERO: string;  // Número do contato
+    CONTATO_NUMERO: string;  // Telefone ou identificador roteável do contato
 }
 ```
 

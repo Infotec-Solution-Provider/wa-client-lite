@@ -12,7 +12,11 @@ test("uses remoteJidAlt phone when the primary JID is a LID", () => {
   });
 
   assert.deepEqual(identity, {
-    contactNumber: "5511999999999",
+    contact: {
+      IDENTIFICADOR: "123456789@lid",
+      TIPO_IDENTIFICADOR: "LID",
+      NUMERO: "5511999999999",
+    },
     lidJid: null,
     primaryJid: "123456789@lid",
     source: "remoteJidAlt",
@@ -25,7 +29,11 @@ test("keeps direct phone JIDs compatible", () => {
   });
 
   assert.deepEqual(identity, {
-    contactNumber: "5511999999999",
+    contact: {
+      IDENTIFICADOR: "5511999999999",
+      TIPO_IDENTIFICADOR: "PHONE",
+      NUMERO: "5511999999999",
+    },
     lidJid: null,
     primaryJid: "5511999999999:14@s.whatsapp.net",
     source: "remoteJid",
@@ -38,7 +46,11 @@ test("returns an unresolved LID for the session mapping fallback", () => {
   });
 
   assert.deepEqual(identity, {
-    contactNumber: null,
+    contact: {
+      IDENTIFICADOR: "123456789@lid",
+      TIPO_IDENTIFICADOR: "LID",
+      NUMERO: null,
+    },
     lidJid: "123456789@lid",
     primaryJid: "123456789@lid",
     source: null,
