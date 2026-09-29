@@ -233,6 +233,7 @@ wa-client-lite/
 - Conexão direta via WebSocket, mesma biblioteca usada pelo wwebjs-api
 - Requer Node.js 20.9+ e ffmpeg no PATH (conversão de áudio)
 - Sessão guardada em tabelas `zapo_*` num MySQL 5.7+ (variáveis `ZAPO_DB_*`, com fallback para `BAILEYS_AUTH_DB_*`)
+- Com MySQL mais antigo, use `ZAPO_STORE=sqlite`: a sessão vai para `zapo-sessions/<cliente>_<numero>.sqlite` (pasta configurável em `ZAPO_SQLITE_DIR`)
 - Não implementa `load-messages`, `load-contacts` nem mensagens automáticas
 
 Para migrar uma instância existente (exige ler o QR de novo):

@@ -10,6 +10,7 @@ import {
 } from "mysql2/promise";
 import { schedule } from "node-cron";
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createMysqlStore } from "@zapo-js/store-mysql";
@@ -246,6 +247,39 @@ class WhatsappZapoInstance {
   private getStore(): WaStore {
     if (this.store) return this.store;
 
+    const backend =
+      process.env["ZAPO_STORE"]?.trim().toLowerCase() === "sqlite"
+        ? this.createSqliteBackend()
+        : this.createMysqlBackend();
+
+    this.store = createStore({
+      backends: { db: backend },
+      providers: {
+        auth: "db",
+        signal: "db",
+        preKey: "db",
+        session: "db",
+        identity: "db",
+        senderKey: "db",
+        appState: "db",
+        messages: "db",
+        threads: "db",
+        contacts: "db",
+        privacyToken: "db",
+      },
+      cacheProviders: {
+        retry: "db",
+        groupMetadata: "db",
+        chatMetadata: "db",
+        deviceList: "db",
+        messageSecret: "db",
+      },
+    });
+
+    return this.store;
+  }
+
+  private createMysqlBackend() {
     const mysqlStore = createMysqlStore({
       pool: getZapoStoreConnection(),
       tablePrefix: process.env["ZAPO_TABLE_PREFIX"] || "zapo_",
@@ -260,33 +294,25 @@ class WhatsappZapoInstance {
         },
       },
     });
-
-    this.store = createStore({
-      backends: { mysql: mysqlStore },
-      providers: {
-        auth: "mysql",
-        signal: "mysql",
-        preKey: "mysql",
-        session: "mysql",
-        identity: "mysql",
-        senderKey: "mysql",
-        appState: "mysql",
-        messages: "mysql",
-        threads: "mysql",
-        contacts: "mysql",
-        privacyToken: "mysql",
-      },
-      cacheProviders: {
-        retry: "mysql",
-        groupMetadata: "mysql",
-        chatMetadata: "mysql",
-        deviceList: "mysql",
-        messageSecret: "mysql",
-      },
-    });
     mysqlStore.startCleanup(this.sessionId);
 
-    return this.store;
+    return mysqlStore;
+  }
+
+  // One file per session, for machines whose MySQL cannot hold the zapo tables
+  // (utf8mb4 keys need 5.7+). Loaded on demand because better-sqlite3 is an
+  // optional native dependency; without it the store falls back to node:sqlite.
+  private createSqliteBackend() {
+    const { createSqliteStore } =
+      require("@zapo-js/store-sqlite") as typeof import("@zapo-js/store-sqlite");
+    const sessionsDir =
+      process.env["ZAPO_SQLITE_DIR"] || join(process.cwd(), "zapo-sessions");
+    mkdirSync(sessionsDir, { recursive: true });
+
+    return createSqliteStore({
+      path: join(sessionsDir, `${this.sessionId}.sqlite`),
+      logger: zapoLogger,
+    });
   }
 
   private startClient() {

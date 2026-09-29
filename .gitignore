@@ -8,3 +8,4 @@ dist/files/*
 dist/temp/*
 prisma
 dist
+zapo-sessions
