@@ -280,8 +280,13 @@ class WhatsappZapoInstance {
   }
 
   private createMysqlBackend() {
+    const connection = getZapoStoreConnection();
+    logWithDate(
+      `[${this.clientName} - ${this.whatsappNumber}] Zapo session store: MySQL ${connection.host}:${connection.port}/${connection.database} (set ZAPO_STORE=sqlite for MySQL older than 5.7)`,
+    );
+
     const mysqlStore = createMysqlStore({
-      pool: getZapoStoreConnection(),
+      pool: connection,
       tablePrefix: process.env["ZAPO_TABLE_PREFIX"] || "zapo_",
       logger: zapoLogger,
       cleanup: {
@@ -307,12 +312,13 @@ class WhatsappZapoInstance {
       require("@zapo-js/store-sqlite") as typeof import("@zapo-js/store-sqlite");
     const sessionsDir =
       process.env["ZAPO_SQLITE_DIR"] || join(process.cwd(), "zapo-sessions");
+    const sessionFile = join(sessionsDir, `${this.sessionId}.sqlite`);
     mkdirSync(sessionsDir, { recursive: true });
+    logWithDate(
+      `[${this.clientName} - ${this.whatsappNumber}] Zapo session store: SQLite ${sessionFile}`,
+    );
 
-    return createSqliteStore({
-      path: join(sessionsDir, `${this.sessionId}.sqlite`),
-      logger: zapoLogger,
-    });
+    return createSqliteStore({ path: sessionFile, logger: zapoLogger });
   }
 
   private startClient() {
