@@ -1,6 +1,7 @@
 import { FieldPacket, RowDataPacket } from "mysql2";
 import WhatsappInstance from "./whatsapp";
 import WhatsappBaileysInstance from "./whatsapp-baileys";
+import WhatsappZapoInstance from "./whatsapp-zapo";
 import { DBWhatsappInstance } from "./types";
 import "dotenv/config";
 import whatsappClientPool from "./connection";
@@ -24,8 +25,11 @@ WHERE c.is_active AND wi.is_active;
 const getURL = (client: string) =>
   REQUEST_URL?.replace(":clientName", client) || "";
 
-// Union type for both instance types
-export type AnyWhatsappInstance = WhatsappInstance | WhatsappBaileysInstance;
+// Union type for all instance types
+export type AnyWhatsappInstance =
+  | WhatsappInstance
+  | WhatsappBaileysInstance
+  | WhatsappZapoInstance;
 
 class WhatsappInstances {
   public instances: Array<AnyWhatsappInstance> = [];
@@ -59,6 +63,13 @@ class WhatsappInstances {
           );
         case "BAILEYS":
           return new WhatsappBaileysInstance(
+            i.client_name,
+            i.number,
+            apiUrl,
+            connectionParams,
+          );
+        case "ZAPO":
+          return new WhatsappZapoInstance(
             i.client_name,
             i.number,
             apiUrl,

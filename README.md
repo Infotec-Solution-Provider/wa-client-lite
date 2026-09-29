@@ -1,6 +1,6 @@
 # WA Client Lite
 
-Cliente WhatsApp leve para integração com sistemas backend. Suporta duas implementações: **whatsapp-web.js** (WWEBJS) e **Baileys**.
+Cliente WhatsApp leve para integração com sistemas backend. Suporta três implementações: **whatsapp-web.js** (WWEBJS), **Baileys** e **Zapo**.
 
 ## 📋 Índice
 
@@ -195,6 +195,7 @@ wa-client-lite/
 │   ├── instances.ts              # Gerenciador de instâncias
 │   ├── whatsapp.ts               # Implementação WWEBJS
 │   ├── whatsapp-baileys.ts       # Implementação Baileys
+│   ├── whatsapp-zapo.ts          # Implementação Zapo
 │   ├── types.ts                  # Tipos TypeScript
 │   ├── utils.ts                  # Funções utilitárias
 │   ├── log.ts                    # Sistema de logs
@@ -226,6 +227,21 @@ wa-client-lite/
 - Menor consumo de recursos
 - Mais rápido e leve
 - Suporta armazenamento de sessão em MySQL
+
+### Zapo (zapo-js)
+
+- Conexão direta via WebSocket, mesma biblioteca usada pelo wwebjs-api
+- Requer Node.js 20.9+ e ffmpeg no PATH (conversão de áudio)
+- Sessão guardada em tabelas `zapo_*` num MySQL 5.7+ (variáveis `ZAPO_DB_*`, com fallback para `BAILEYS_AUTH_DB_*`)
+- Não implementa `load-messages`, `load-contacts` nem mensagens automáticas
+
+Para migrar uma instância existente (exige ler o QR de novo):
+
+```sql
+ALTER TABLE whatsapp_instances
+  MODIFY COLUMN `type` ENUM('WWEBJS','BAILEYS','ZAPO') NOT NULL DEFAULT 'WWEBJS';
+UPDATE whatsapp_instances SET `type` = 'ZAPO' WHERE number = '5511999999999';
+```
 
 ## 📄 Licença
 

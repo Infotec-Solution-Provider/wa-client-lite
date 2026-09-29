@@ -96,7 +96,7 @@ Instâncias de WhatsApp configuradas.
 CREATE TABLE IF NOT EXISTS `whatsapp_instances` (
   `number` varchar(13) NOT NULL,
   `client_name` varchar(50) NOT NULL,
-  `type` enum('WWEBJS','BAILEYS') NOT NULL DEFAULT 'WWEBJS',
+  `type` enum('WWEBJS','BAILEYS','ZAPO') NOT NULL DEFAULT 'WWEBJS',
   `is_active` tinyint(4) NOT NULL DEFAULT '1',
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS `whatsapp_instances` (
 |--------|------|-----------|
 | `number` | varchar(13) | **PK** - Número do WhatsApp |
 | `client_name` | varchar(50) | **FK** - Nome do cliente |
-| `type` | enum | Tipo de implementação (WWEBJS/BAILEYS) |
+| `type` | enum | Tipo de implementação (WWEBJS/BAILEYS/ZAPO) |
 | `is_active` | tinyint | Se a instância está ativa |
 | `created_at` | timestamp | Data de criação |
 | `updated_at` | timestamp | Data de atualização |
@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS `whatsapp_instances` (
 |------|-----------|
 | `WWEBJS` | whatsapp-web.js (Puppeteer) |
 | `BAILEYS` | @whiskeysockets/baileys (WebSocket) |
+| `ZAPO` | zapo-js (WebSocket); sessão nas tabelas `zapo_*` (MySQL 5.7+) |
 
 ---
 

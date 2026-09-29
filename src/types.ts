@@ -8,7 +8,7 @@ export interface SendFileOptions {
     isAudio?: "true" | "false";
 }
 
-export type WhatsappInstanceType = "WWEBJS" | "BAILEYS";
+export type WhatsappInstanceType = "WWEBJS" | "BAILEYS" | "ZAPO";
 
 export interface DBWhatsappInstance {
     readonly number: string;

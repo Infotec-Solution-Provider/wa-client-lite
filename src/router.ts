@@ -10,6 +10,7 @@ import instances from "./instances";
 import { decodeSafeURI, filesPath, isUUID, logWithDate } from "./utils";
 import WhatsappInstance from "./whatsapp";
 import WhatsappBaileysInstance from "./whatsapp-baileys";
+import WhatsappZapoInstance from "./whatsapp-zapo";
 import axios from "axios";
 
 config();
@@ -136,17 +137,17 @@ class AppRouter {
 					}/${contact}`,
 					parsedMessage
 				);
-				const randomInterval = 5000 + Math.random() * 5000;
-
-				contacts.shift();
-
-				if (contacts.length) {
-					setTimeout(() => {
-						sendMMType1(contacts, file);
-					}, randomInterval);
-				}
 			} catch (err) {
 				logWithDate(`Send MM Failure =>`, err);
+			}
+
+			// A failed contact must not stop the rest of the campaign.
+			contacts.shift();
+
+			if (contacts.length) {
+				setTimeout(() => {
+					sendMMType1(contacts, file);
+				}, 5000 + Math.random() * 5000);
 			}
 		};
 
@@ -179,17 +180,17 @@ class AppRouter {
 					}/${contact}`,
 					parsedMessage
 				);
-				const randomInterval = 5000 + Math.random() * 5000;
-
-				contacts.shift();
-
-				if (contacts.length) {
-					setTimeout(() => {
-						sendMMType2(contacts, file);
-					}, randomInterval);
-				}
 			} catch (err) {
 				logWithDate(`Send MM Failure =>`, err);
+			}
+
+			// A failed contact must not stop the rest of the campaign.
+			contacts.shift();
+
+			if (contacts.length) {
+				setTimeout(() => {
+					sendMMType2(contacts, file);
+				}, 5000 + Math.random() * 5000);
 			}
 		};
 
@@ -511,7 +512,10 @@ class AppRouter {
 					clientsStatus.push(instanceData);
 				}
 
-				if (instance instanceof WhatsappBaileysInstance) {
+				if (
+					instance instanceof WhatsappBaileysInstance ||
+					instance instanceof WhatsappZapoInstance
+				) {
 					const instanceData = {
 						client: instance.clientName,
 						number: instance.whatsappNumber,

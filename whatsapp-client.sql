@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS `database_connections` (
 CREATE TABLE IF NOT EXISTS `whatsapp_instances` (
   `number` varchar(13) COLLATE utf8_unicode_ci NOT NULL,
   `client_name` varchar(50) COLLATE utf8_unicode_ci NOT NULL,
-  `type` enum('WWEBJS','BAILEYS') COLLATE utf8_unicode_ci NOT NULL DEFAULT 'WWEBJS',
+  `type` enum('WWEBJS','BAILEYS','ZAPO') COLLATE utf8_unicode_ci NOT NULL DEFAULT 'WWEBJS',
   `is_active` tinyint(4) NOT NULL DEFAULT '1',
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
