@@ -11,6 +11,7 @@ import makeWASocket, {
   downloadMediaMessage,
   fetchLatestBaileysVersion,
   getContentType,
+  jidDecode,
   makeCacheableSignalKeyStore,
   proto,
 } from "baileys";
@@ -39,6 +40,7 @@ import whatsappClientPool from "./connection";
 import loadAvatars from "./functions/loadAvatars";
 import loadMessages from "./functions/loadMessages";
 import Log from "./log";
+import { SessionTracker } from "./session-status";
 import { DBAutomaticMessage, ParsedMessage, SendFileOptions } from "./types";
 import {
   encodeParsedMessage,
@@ -76,6 +78,7 @@ class WhatsappBaileysInstance {
   private contactProcessing: Map<string, boolean> = new Map();
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
+  private reconnectTimer: NodeJS.Timeout | null = null;
   private removeCreds: (() => Promise<void>) | null = null;
   private phoneContacts: Map<
     string,
@@ -83,6 +86,7 @@ class WhatsappBaileysInstance {
   > = new Map();
   private isLoadingContacts: boolean = false;
   private readonly historyMinDate: Date | null;
+  public readonly session: SessionTracker;
 
   constructor(
     clientName: string,
@@ -95,6 +99,7 @@ class WhatsappBaileysInstance {
     this.requestURL = requestURL;
     this.connectionParams = connection;
     this.historyMinDate = this.buildHistoryMinDate();
+    this.session = new SessionTracker(clientName, whatsappNumber, "BAILEYS");
 
     schedule(process.env["CRON_LOAD_AVATARS"] || "0 */4 * * *", async () => {
       try {
@@ -322,7 +327,26 @@ class WhatsappBaileysInstance {
     }
   }
 
+  private clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  // Only one reconnect may be pending, so a restart from the panel cannot race a backoff timer.
+  private scheduleReconnect(delay: number) {
+    this.clearReconnectTimer();
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connectToWhatsApp();
+    }, delay);
+  }
+
   private async connectToWhatsApp() {
+    this.clearReconnectTimer();
+    this.session.starting();
+
     let version: [number, number, number] = [2, 3000, 1041589577];
 
     try {
@@ -383,13 +407,15 @@ class WhatsappBaileysInstance {
         `[${this.clientName} - ${this.whatsappNumber}] Failed to initialize MySQL auth state:`,
         authError,
       );
-      setTimeout(() => this.connectToWhatsApp(), 10000);
+      this.session.disconnected("Failed to load the session from MySQL");
+      this.scheduleReconnect(10000);
       return;
     }
 
     this.removeCreds = removeCreds;
 
-    this.client = makeWASocket({
+    const previousClient = this.client;
+    const sock = makeWASocket({
       auth: {
         creds: state.creds as any,
         keys: makeCacheableSignalKeyStore(state.keys as any, logger),
@@ -405,15 +431,25 @@ class WhatsappBaileysInstance {
       markOnlineOnConnect: true,
       generateHighQualityLinkPreview: true,
     });
+    this.client = sock;
+
+    if (previousClient) {
+      void previousClient.end(undefined);
+    }
 
     // Handle credentials update
     this.client.ev.on("creds.update", saveCreds);
 
     // Handle connection updates
     this.client.ev.on("connection.update", async (update) => {
+      // A socket replaced by a restart, logout or reconnect must not drive the current one.
+      if (sock !== this.client) return;
+
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
+        this.session.qrReceived(qr);
+
         try {
           await axios.post(`${this.requestURL}/qr/${this.whatsappNumber}`, {
             qr,
@@ -440,6 +476,9 @@ class WhatsappBaileysInstance {
         // Immediately mark as not ready to prevent sending messages
         this.isReady = false;
         this.isAuthenticated = false;
+        this.session.disconnected(
+          `${errorMessage || "Connection closed"} (code ${statusCode ?? "unknown"})`,
+        );
 
         logWithDate(
           `[${this.clientName} - ${this.whatsappNumber}] Connection closed (code: ${statusCode}) due to ${lastDisconnect?.error}`,
@@ -451,13 +490,15 @@ class WhatsappBaileysInstance {
             `[${this.clientName} - ${this.whatsappNumber}] Logged out. Clearing credentials and reconnecting...`,
           );
 
+          this.session.loggedOut();
+
           // Remove credentials from MySQL
           if (this.removeCreds) {
             await this.removeCreds();
           }
 
           // Reconnect after clearing credentials
-          setTimeout(() => this.connectToWhatsApp(), 5000);
+          this.scheduleReconnect(5000);
         } else if (
           statusCode === DisconnectReason.restartRequired ||
           errorMessage.includes("QR refs") ||
@@ -468,7 +509,7 @@ class WhatsappBaileysInstance {
             `[${this.clientName} - ${this.whatsappNumber}] Restart required or QR expired. Reconnecting immediately...`,
           );
           this.reconnectAttempts = 0;
-          setTimeout(() => this.connectToWhatsApp(), 2000);
+          this.scheduleReconnect(2000);
         } else if (
           statusCode === DisconnectReason.connectionClosed ||
           statusCode === DisconnectReason.connectionLost ||
@@ -485,13 +526,13 @@ class WhatsappBaileysInstance {
             logWithDate(
               `[${this.clientName} - ${this.whatsappNumber}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`,
             );
-            setTimeout(() => this.connectToWhatsApp(), delay);
+            this.scheduleReconnect(delay);
           } else {
             logWithDate(
               `[${this.clientName} - ${this.whatsappNumber}] Max reconnect attempts reached. Will retry in 5 minutes...`,
             );
             this.reconnectAttempts = 0;
-            setTimeout(() => this.connectToWhatsApp(), 300000);
+            this.scheduleReconnect(300000);
           }
         } else {
           // Unknown error - try to reconnect anyway
@@ -504,19 +545,23 @@ class WhatsappBaileysInstance {
             logWithDate(
               `[${this.clientName} - ${this.whatsappNumber}] Unknown disconnect reason. Reconnecting in ${delay}ms...`,
             );
-            setTimeout(() => this.connectToWhatsApp(), delay);
+            this.scheduleReconnect(delay);
           } else {
             logWithDate(
               `[${this.clientName} - ${this.whatsappNumber}] Max reconnect attempts reached after an unknown disconnect. Will retry in 5 minutes...`,
             );
             this.reconnectAttempts = 0;
-            setTimeout(() => this.connectToWhatsApp(), 300000);
+            this.scheduleReconnect(300000);
           }
         }
       } else if (connection === "open") {
         this.reconnectAttempts = 0;
         this.isAuthenticated = true;
         this.isReady = true;
+        this.session.connected(
+          jidDecode(sock.user?.id)?.user,
+          sock.user?.name || sock.user?.notify,
+        );
 
         try {
           await axios.post(
@@ -1385,6 +1430,7 @@ class WhatsappBaileysInstance {
     }
 
     const { contactNumber, source } = contactIdentity;
+    this.session.messageReceived(waMessage.messageTimestamp);
 
     if (source !== "remoteJid") {
       logWithDate(
@@ -1946,6 +1992,7 @@ class WhatsappBaileysInstance {
       log.setData((data: any) => ({ ...data, sentMessage }));
 
       if (sentMessage) {
+        this.session.messageSent();
         const parsedMessage = await this.parseMessage(sentMessage);
         log.event("parsed message");
         log.setData((data: any) => ({ ...data, parsedMessage }));
@@ -2060,6 +2107,7 @@ class WhatsappBaileysInstance {
       log.setData((data: any) => ({ ...data, sentMessage }));
 
       if (sentMessage) {
+        this.session.messageSent();
         const parsedMessage = await this.parseMessage(sentMessage);
         log.setData((data: any) => ({ ...data, parsedMessage }));
 
@@ -2363,26 +2411,71 @@ class WhatsappBaileysInstance {
     }
   }
 
-  // Method to gracefully close the connection
-  public async close(clearCredentials: boolean = false) {
-    if (this.client) {
-      this.client.end(undefined);
-      this.client = null;
-      this.isReady = false;
-      this.isAuthenticated = false;
-
-      if (clearCredentials && this.removeCreds) {
-        await this.removeCreds();
-        logWithDate(
-          `[${this.clientName} - ${this.whatsappNumber}] Credentials cleared from MySQL`,
-        );
-      }
-    }
+  public getSessionStatus() {
+    return this.session.snapshot({
+      auth: this.isAuthenticated,
+      ready: this.isReady,
+    });
   }
 
-  // Method to logout and clear credentials
+  // Detaches the current socket first, so its close event does not schedule a reconnect.
+  private detachClient() {
+    this.clearReconnectTimer();
+    const sock = this.client;
+    this.client = null;
+    this.isReady = false;
+    this.isAuthenticated = false;
+
+    return sock;
+  }
+
+  // Reconnects with the stored credentials; no new QR is needed.
+  public async restart() {
+    await this.session.runAction("RESTART", async () => {
+      const sock = this.detachClient();
+
+      if (sock) {
+        await sock.end(undefined).catch(() => undefined);
+      }
+
+      this.reconnectAttempts = 0;
+      void this.connectToWhatsApp();
+    });
+  }
+
+  // Unlinks the device from the phone, wipes the credentials and starts a new QR pairing.
   public async logout() {
-    await this.close(true);
+    await this.session.runAction("LOGOUT", async () => {
+      const sock = this.detachClient();
+
+      if (sock) {
+        // Late credential writes from the old socket would bring the session back.
+        sock.ev.removeAllListeners("creds.update");
+
+        try {
+          await sock.logout();
+        } catch (err) {
+          logWithDate(
+            `[${this.clientName} - ${this.whatsappNumber}] Logout request failed; clearing the local session anyway =>`,
+            err,
+          );
+          await sock.end(undefined).catch(() => undefined);
+        }
+      }
+
+      try {
+        if (this.removeCreds) {
+          await this.removeCreds();
+          logWithDate(
+            `[${this.clientName} - ${this.whatsappNumber}] Credentials cleared from MySQL`,
+          );
+        }
+      } finally {
+        this.session.loggedOut();
+        this.reconnectAttempts = 0;
+        void this.connectToWhatsApp();
+      }
+    });
   }
 }
 

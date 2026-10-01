@@ -32,6 +32,7 @@ import {
 import whatsappClientPool from "./connection";
 import loadAvatars from "./functions/loadAvatars";
 import Log from "./log";
+import { SessionTracker, waitUntil } from "./session-status";
 import { ParsedMessage, SendFileOptions } from "./types";
 import {
   encodeParsedMessage,
@@ -147,6 +148,7 @@ class WhatsappZapoInstance {
   private contactQueues: Map<string, Array<() => Promise<void>>> = new Map();
   private contactProcessing: Map<string, boolean> = new Map();
   private readonly outgoingEvents = new Map<string, WaOutgoingMessageEvent>();
+  public readonly session: SessionTracker;
 
   constructor(
     clientName: string,
@@ -159,6 +161,7 @@ class WhatsappZapoInstance {
     this.requestURL = requestURL;
     this.connectionParams = connection;
     this.sessionId = `${clientName}_${whatsappNumber}`;
+    this.session = new SessionTracker(clientName, whatsappNumber, "ZAPO");
 
     schedule(process.env["CRON_LOAD_AVATARS"] || "0 */4 * * *", async () => {
       try {
@@ -322,6 +325,15 @@ class WhatsappZapoInstance {
   }
 
   private startClient() {
+    this.session.starting();
+
+    // A restart can land while a reconnect from a logout is still scheduled.
+    const previousClient = this.client;
+    if (previousClient) {
+      previousClient.removeAllListeners();
+      void previousClient.disconnect().catch(() => undefined);
+    }
+
     const client = new WaClient(
       {
         store: this.getStore(),
@@ -414,6 +426,7 @@ class WhatsappZapoInstance {
   private async onQr(qr: string) {
     this.isAuthenticated = false;
     this.isReady = false;
+    this.session.qrReceived(qr);
 
     try {
       await axios.post(`${this.requestURL}/qr/${this.whatsappNumber}`, { qr });
@@ -444,6 +457,10 @@ class WhatsappZapoInstance {
 
       const credentials = client.getCredentials();
       const connectedNumber = getJidUser(credentials?.meJid);
+      this.session.connected(
+        connectedNumber,
+        credentials?.pushName || credentials?.meDisplayName,
+      );
       if (connectedNumber && connectedNumber !== this.whatsappNumber) {
         logWithDate(
           `[${this.clientName} - ${this.whatsappNumber}] Warning: the paired phone is ${connectedNumber}, not the configured instance number.`,
@@ -482,12 +499,16 @@ class WhatsappZapoInstance {
 
     this.isReady = false;
     this.isAuthenticated = false;
+    this.session.disconnected(
+      `${event.reason || "Connection closed"} (code ${event.code ?? "none"})`,
+    );
 
     logWithDate(
       `[${this.clientName} - ${this.whatsappNumber}] Connection closed (code: ${event.code}, reason: ${event.reason}, logout: ${event.isLogout})`,
     );
 
     if (event.isLogout) {
+      this.session.loggedOut();
       await this.restartAfterLogout(client);
       return;
     }
@@ -545,6 +566,82 @@ class WhatsappZapoInstance {
     await session.destroy();
   }
 
+  public getSessionStatus() {
+    return this.session.snapshot({
+      auth: this.isAuthenticated,
+      ready: this.isReady,
+    });
+  }
+
+  // Detaches the current client first, so its close event does not schedule a reconnect.
+  private async detachClient() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    const client = this.client;
+    this.client = null;
+    this.isReady = false;
+    this.isAuthenticated = false;
+
+    if (client) {
+      await client.disconnect().catch(() => undefined);
+      client.removeAllListeners();
+    }
+  }
+
+  // Reconnects with the stored session; no new QR is needed.
+  public async restart() {
+    await this.session.runAction("RESTART", async () => {
+      await this.detachClient();
+      this.reconnectAttempts = 0;
+      this.startClient();
+    });
+  }
+
+  // Unlinks the device from the phone, wipes the session and starts a new QR pairing.
+  public async logout() {
+    await this.session.runAction("LOGOUT", async () => {
+      const client = this.client;
+
+      if (client && this.isReady && client.getCredentials()?.meJid) {
+        try {
+          // The server closes the socket next; onConnection wipes the session and pairs again.
+          await client.logout();
+
+          if (
+            await waitUntil(
+              () => this.client !== client,
+              LOGOUT_CLEAR_TIMEOUT_MS + 5_000,
+            )
+          ) {
+            return;
+          }
+
+          logWithDate(
+            `[${this.clientName} - ${this.whatsappNumber}] The server did not close the session after logout; clearing it locally.`,
+          );
+        } catch (err) {
+          logWithDate(
+            `[${this.clientName} - ${this.whatsappNumber}] Logout request failed; clearing the local session anyway =>`,
+            err,
+          );
+        }
+      }
+
+      await this.detachClient();
+
+      try {
+        await this.clearStoredSession();
+      } finally {
+        this.session.loggedOut();
+        this.reconnectAttempts = 0;
+        this.startClient();
+      }
+    });
+  }
+
   private getReadyClient(): WaClient {
     if (!this.client) throw new Error("Client not connected");
     if (!this.isReady || !this.isAuthenticated) {
@@ -562,6 +659,8 @@ class WhatsappZapoInstance {
 
     const content = parseZapoMessage(event.message);
     if (!content) return;
+
+    this.session.messageReceived(event.timestampSeconds);
 
     // Number lookups are async; chaining them keeps the arrival order per contact.
     this.inboundChain = this.inboundChain
@@ -975,6 +1074,7 @@ class WhatsappZapoInstance {
         quotedMessageId,
       );
       log.event("sent whatsapp message");
+      this.session.messageSent();
 
       logWithDate(
         `[${this.clientName} - ${this.whatsappNumber}] Send text success => ${messageId}`,
@@ -1050,6 +1150,7 @@ class WhatsappZapoInstance {
 
       const messageId = await this.sendContent(client, jid, content, quotedMessageId);
       log.event("sent whatsapp message");
+      this.session.messageSent();
 
       const ARQUIVO = await this.storeMediaFile(buffer, {
         fileName: fileName || null,

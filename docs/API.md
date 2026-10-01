@@ -64,6 +64,91 @@ GET /whatsapp/clients
 | `ready` | boolean | Se está pronto para uso |
 | `status` | string | Estado da conexão |
 
+Aceita `?client=<nome>` para listar só as instâncias de um cliente. Instâncias Baileys e ZAPO trazem também os campos de [Status da Sessão](#status-da-sessão).
+
+---
+
+### Status da Sessão
+
+Retorna o estado da sessão de uma instância Baileys ou ZAPO. Instâncias WWEBJS respondem 400.
+
+```http
+GET /whatsapp/clients/:from/session
+```
+
+#### Resposta de Sucesso (200)
+
+```json
+{
+  "client": "empresa_abc",
+  "number": "5511999999999",
+  "type": "BAILEYS",
+  "auth": true,
+  "ready": true,
+  "state": "CONNECTED",
+  "action": null,
+  "phone": "5511999999999",
+  "pushName": "Empresa ABC",
+  "qr": null,
+  "qrAt": null,
+  "startedAt": "2026-10-01T11:00:00.000Z",
+  "connectedAt": "2026-10-01T11:00:12.000Z",
+  "stateChangedAt": "2026-10-01T11:00:12.000Z",
+  "lastDisconnectReason": null,
+  "lastReceivedAt": "2026-10-01T13:42:05.000Z",
+  "lastSentAt": "2026-10-01T13:40:51.000Z"
+}
+```
+
+#### Campos da Resposta
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `state` | string | `STARTING`, `QR_PENDING`, `CONNECTED` ou `DISCONNECTED` |
+| `action` | string \| null | `RESTART` ou `LOGOUT` enquanto uma ação está em andamento |
+| `phone` | string \| null | Número pareado de fato (pode diferir de `number`, que é o identificador da instância) |
+| `pushName` | string \| null | Nome do perfil no WhatsApp |
+| `qr` / `qrAt` | string \| null | QR code atual e quando foi gerado, enquanto `state` é `QR_PENDING` |
+| `startedAt` | string | Quando o serviço criou a instância |
+| `connectedAt` | string \| null | Início da conexão atual (base do tempo de sessão) |
+| `stateChangedAt` | string | Última mudança de `state` |
+| `lastDisconnectReason` | string \| null | Motivo da última desconexão |
+| `lastReceivedAt` | string \| null | Última mensagem recebida (carregada da tabela `messages` ao iniciar) |
+| `lastSentAt` | string \| null | Última mensagem enviada desde que o serviço iniciou |
+
+---
+
+### Reiniciar Sessão
+
+Fecha a conexão e reconecta com as credenciais salvas, sem novo QR code.
+
+```http
+POST /whatsapp/clients/:from/restart
+```
+
+Responde 200 com o [Status da Sessão](#status-da-sessão) logo após iniciar a reconexão.
+
+---
+
+### Desvincular Número
+
+Remove o aparelho da lista de dispositivos conectados do celular, apaga as credenciais e inicia um novo pareamento. O QR code segue pelo callback `POST {REQUEST_URL}/qr/:number`.
+
+```http
+POST /whatsapp/clients/:from/logout
+```
+
+Responde 200 com o [Status da Sessão](#status-da-sessão).
+
+#### Respostas de Erro (restart e logout)
+
+| Código | Descrição |
+|--------|-----------|
+| 400 | Instância WWEBJS (não suportada) |
+| 404 | Instância não encontrada |
+| 409 | Outra ação já está em andamento na instância |
+| 500 | Falha ao executar a ação |
+
 ---
 
 ### Obter Foto de Perfil

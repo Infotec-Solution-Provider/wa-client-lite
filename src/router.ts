@@ -7,6 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadContacts } from "./functions/loadContacts";
 import instances from "./instances";
+import { SessionBusyError } from "./session-status";
 import { decodeSafeURI, filesPath, isUUID, logWithDate } from "./utils";
 import WhatsappInstance from "./whatsapp";
 import WhatsappBaileysInstance from "./whatsapp-baileys";
@@ -14,6 +15,72 @@ import WhatsappZapoInstance from "./whatsapp-zapo";
 import axios from "axios";
 
 config();
+
+// Session management (status, restart, logout) covers the instance types in use: Baileys and ZAPO.
+function findManagedInstance(
+	from: string | undefined,
+	res: Response
+): WhatsappBaileysInstance | WhatsappZapoInstance | null {
+	if (!from) {
+		res.status(400).json({ message: "Parameter 'from' is required" });
+		return null;
+	}
+
+	const instance = instances.find(from);
+
+	if (!instance) {
+		res.status(404).json({ message: "Whatsapp number isn't found" });
+		return null;
+	}
+
+	if (
+		!(instance instanceof WhatsappBaileysInstance) &&
+		!(instance instanceof WhatsappZapoInstance)
+	) {
+		res.status(400).json({
+			message: "Session management is only available for Baileys and ZAPO instances",
+		});
+		return null;
+	}
+
+	return instance;
+}
+
+async function runSessionAction(
+	req: Request,
+	res: Response,
+	action: "restart" | "logout"
+) {
+	const instance = findManagedInstance(req.params["from"], res);
+
+	if (!instance) {
+		return;
+	}
+
+	try {
+		if (action === "restart") {
+			await instance.restart();
+		} else {
+			await instance.logout();
+		}
+
+		res.status(200).json(instance.getSessionStatus());
+	} catch (err: any) {
+		if (err instanceof SessionBusyError) {
+			res.status(409).json({
+				message: `Another session action is already running (${err.action})`,
+				action: err.action,
+			});
+			return;
+		}
+
+		logWithDate(`[${instance.clientName} - ${instance.whatsappNumber}] Session ${action} failure =>`, err);
+		res.status(500).json({
+			message: `Failed to ${action} the session`,
+			error: err?.message || String(err),
+		});
+	}
+}
 
 class AppRouter {
 	public readonly router = Router();
@@ -30,6 +97,9 @@ class AppRouter {
 		this.router.get("/clients/:from/contacts-stats", this.getContactsStats);
 		this.router.post("/clients/:from/sync-contacts-from-messages", this.syncContactsFromMessages);
 		this.router.get("/clients/:from/validate-number/:to", this.validateNumber);
+		this.router.get("/clients/:from/session", this.getSessionStatus);
+		this.router.post("/clients/:from/restart", this.restartSession);
+		this.router.post("/clients/:from/logout", this.logoutSession);
 		this.router.get("/files/:filename", this.getFile);
 		this.router.post("/files", upload.single("file"), this.uploadFile);
 		this.router.post("/clients/:from/messages/:to", upload.single("file"), this.sendMessage);
@@ -494,11 +564,16 @@ class AppRouter {
 		res.status(200).json({ online: true });
 	}
 
-	async getClientStatus(_: Request, res: Response) {
+	async getClientStatus(req: Request, res: Response) {
 		try {
 			const clientsStatus = [];
+			const clientFilter = typeof req.query["client"] === "string" ? req.query["client"] : null;
 
 			for (const instance of instances.instances) {
+				if (clientFilter && instance.clientName !== clientFilter) {
+					continue;
+				}
+
 				if (instance instanceof WhatsappInstance) {
 					const status = await instance.client.getState().catch(() => undefined);
 					const instanceData = {
@@ -517,10 +592,7 @@ class AppRouter {
 					instance instanceof WhatsappZapoInstance
 				) {
 					const instanceData = {
-						client: instance.clientName,
-						number: instance.whatsappNumber,
-						auth: instance.isAuthenticated,
-						ready: instance.isReady,
+						...instance.getSessionStatus(),
 						status: instance.isReady
 							? "CONNECTED"
 							: instance.isAuthenticated
@@ -537,6 +609,22 @@ class AppRouter {
 			logWithDate("Get clients statuses failure => ", err);
 			res.status(500).json({ message: "Something went wrong" });
 		}
+	}
+
+	async getSessionStatus(req: Request, res: Response) {
+		const instance = findManagedInstance(req.params["from"], res);
+
+		if (instance) {
+			res.status(200).json(instance.getSessionStatus());
+		}
+	}
+
+	async restartSession(req: Request, res: Response) {
+		await runSessionAction(req, res, "restart");
+	}
+
+	async logoutSession(req: Request, res: Response) {
+		await runSessionAction(req, res, "logout");
 	}
 
 	async validateNumber(req: Request, res: Response) {
